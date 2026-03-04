@@ -16,6 +16,10 @@ export default defineConfig({
         { label: 'API Reference', autogenerate: { directory: 'api' } },
         { label: 'Guides', autogenerate: { directory: 'guides' } },
       ],
+      components: {
+        Head: './src/components/Head.astro',
+        Footer: './src/components/Footer.astro',
+      },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/bhekanik/cognitive-memory' }],
       editLink: { baseUrl: 'https://github.com/bhekanik/cognitive-memory/edit/main/docs/' },
     }),

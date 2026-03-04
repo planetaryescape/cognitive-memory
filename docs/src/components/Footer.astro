@@ -1,0 +1,224 @@
+---
+import Default from '@astrojs/starlight/components/Footer.astro';
+---
+
+<div class="copy-markdown-container">
+	<button id="copy-markdown" class="copy-markdown-btn" aria-label="Copy page as Markdown">
+		<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+		<span class="copy-label">Copy as Markdown</span>
+	</button>
+</div>
+
+<Default {...Astro.props}><slot /></Default>
+
+<script>
+	function setupCopyButton() {
+		const btn = document.getElementById('copy-markdown');
+		if (!btn) return;
+
+		btn.addEventListener('click', async () => {
+			const content = document.querySelector('[data-pagefind-body]')
+				|| document.querySelector('.sl-markdown-content')
+				|| document.querySelector('main');
+			if (!content) return;
+
+			const markdown = htmlToMarkdown(content as HTMLElement);
+
+			try {
+				await navigator.clipboard.writeText(markdown);
+				const label = btn.querySelector('.copy-label');
+				if (label) {
+					const original = label.textContent;
+					label.textContent = 'Copied!';
+					setTimeout(() => { label.textContent = original; }, 2000);
+				}
+			} catch {
+				// Fallback for non-secure contexts
+				const textarea = document.createElement('textarea');
+				textarea.value = markdown;
+				textarea.style.position = 'fixed';
+				textarea.style.opacity = '0';
+				document.body.appendChild(textarea);
+				textarea.select();
+				document.execCommand('copy');
+				document.body.removeChild(textarea);
+				const label = btn.querySelector('.copy-label');
+				if (label) {
+					const original = label.textContent;
+					label.textContent = 'Copied!';
+					setTimeout(() => { label.textContent = original; }, 2000);
+				}
+			}
+		});
+	}
+
+	function htmlToMarkdown(el: HTMLElement): string {
+		const lines: string[] = [];
+
+		function walk(node: Node) {
+			if (node.nodeType === Node.TEXT_NODE) {
+				const text = node.textContent || '';
+				if (text.trim()) lines.push(text);
+				return;
+			}
+
+			if (node.nodeType !== Node.ELEMENT_NODE) return;
+			const element = node as HTMLElement;
+			const tag = element.tagName.toLowerCase();
+
+			// Skip the copy button itself, nav, and non-content elements
+			if (element.id === 'copy-markdown' || element.closest('.copy-markdown-container')) return;
+			if (tag === 'nav' || tag === 'footer' || tag === 'script' || tag === 'style') return;
+			if (element.getAttribute('aria-hidden') === 'true') return;
+
+			switch (tag) {
+				case 'h1': lines.push(`\n# ${getTextContent(element)}\n`); return;
+				case 'h2': lines.push(`\n## ${getTextContent(element)}\n`); return;
+				case 'h3': lines.push(`\n### ${getTextContent(element)}\n`); return;
+				case 'h4': lines.push(`\n#### ${getTextContent(element)}\n`); return;
+				case 'h5': lines.push(`\n##### ${getTextContent(element)}\n`); return;
+				case 'h6': lines.push(`\n###### ${getTextContent(element)}\n`); return;
+				case 'p': lines.push(`\n${inlineMarkdown(element)}\n`); return;
+				case 'pre': {
+					const code = element.querySelector('code');
+					const lang = code?.className?.match(/language-(\w+)/)?.[1] || '';
+					const text = code?.textContent || element.textContent || '';
+					lines.push(`\n\`\`\`${lang}\n${text.trim()}\n\`\`\`\n`);
+					return;
+				}
+				case 'code': {
+					if (element.parentElement?.tagName.toLowerCase() !== 'pre') {
+						lines.push(`\`${element.textContent}\``);
+						return;
+					}
+					break;
+				}
+				case 'ul': case 'ol': {
+					lines.push('');
+					const items = element.querySelectorAll(':scope > li');
+					items.forEach((li, i) => {
+						const prefix = tag === 'ol' ? `${i + 1}. ` : '- ';
+						lines.push(`${prefix}${inlineMarkdown(li as HTMLElement)}`);
+					});
+					lines.push('');
+					return;
+				}
+				case 'blockquote': {
+					const text = inlineMarkdown(element);
+					lines.push(`\n> ${text.split('\n').join('\n> ')}\n`);
+					return;
+				}
+				case 'table': {
+					const rows = element.querySelectorAll('tr');
+					rows.forEach((row, i) => {
+						const cells = row.querySelectorAll('th, td');
+						const cellTexts = Array.from(cells).map(c => (c.textContent || '').trim());
+						lines.push(`| ${cellTexts.join(' | ')} |`);
+						if (i === 0) {
+							lines.push(`| ${cellTexts.map(() => '---').join(' | ')} |`);
+						}
+					});
+					lines.push('');
+					return;
+				}
+				case 'hr': lines.push('\n---\n'); return;
+				case 'br': lines.push('\n'); return;
+				case 'a': {
+					const href = element.getAttribute('href') || '';
+					const text = getTextContent(element);
+					if (href && text) {
+						lines.push(`[${text}](${href})`);
+						return;
+					}
+					break;
+				}
+				case 'img': {
+					const alt = element.getAttribute('alt') || '';
+					const src = element.getAttribute('src') || '';
+					lines.push(`![${alt}](${src})`);
+					return;
+				}
+				case 'strong': case 'b': lines.push(`**${getTextContent(element)}**`); return;
+				case 'em': case 'i': lines.push(`*${getTextContent(element)}*`); return;
+				case 'details': {
+					const summary = element.querySelector('summary');
+					lines.push(`\n<details>`);
+					if (summary) lines.push(`<summary>${getTextContent(summary)}</summary>\n`);
+					for (const child of element.childNodes) {
+						if (child !== summary) walk(child);
+					}
+					lines.push(`</details>\n`);
+					return;
+				}
+			}
+
+			// Default: walk children
+			for (const child of element.childNodes) {
+				walk(child);
+			}
+		}
+
+		function getTextContent(el: HTMLElement): string {
+			return (el.textContent || '').trim();
+		}
+
+		function inlineMarkdown(el: HTMLElement): string {
+			let result = '';
+			for (const child of el.childNodes) {
+				if (child.nodeType === Node.TEXT_NODE) {
+					result += child.textContent || '';
+				} else if (child.nodeType === Node.ELEMENT_NODE) {
+					const childEl = child as HTMLElement;
+					const childTag = childEl.tagName.toLowerCase();
+					switch (childTag) {
+						case 'strong': case 'b': result += `**${getTextContent(childEl)}**`; break;
+						case 'em': case 'i': result += `*${getTextContent(childEl)}*`; break;
+						case 'code': result += `\`${childEl.textContent}\``; break;
+						case 'a': {
+							const href = childEl.getAttribute('href') || '';
+							result += `[${getTextContent(childEl)}](${href})`;
+							break;
+						}
+						default: result += getTextContent(childEl);
+					}
+				}
+			}
+			return result.trim();
+		}
+
+		walk(el);
+		return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+	}
+
+	// Run on initial load and after view transitions
+	setupCopyButton();
+	document.addEventListener('astro:after-swap', setupCopyButton);
+</script>
+
+<style>
+	.copy-markdown-container {
+		display: flex;
+		justify-content: flex-end;
+		margin-bottom: 0.5rem;
+		margin-top: 2rem;
+	}
+
+	.copy-markdown-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.35rem 0.75rem;
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-3);
+		background: transparent;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.375rem;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+
+	.copy-markdown-btn:hover {
+		color: var(--sl-color-white);
+		border-color: var(--sl-color-gray-3);
+	}
+</style>
