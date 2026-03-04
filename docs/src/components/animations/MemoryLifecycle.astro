@@ -1,0 +1,75 @@
+---
+/**
+ * Animated memory lifecycle diagram.
+ * Shows: Conversation → Extraction → Embedding → Storage → Decay → Retrieval
+ */
+---
+
+<div class="animation-container">
+	<svg viewBox="0 0 780 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Memory lifecycle: Conversation to Extraction to Embedding to Storage to Decay to Retrieval">
+		<!-- Stage labels -->
+		{[
+			{ x: 60, label: 'Conversation', color: 'var(--cm-cyan)' },
+			{ x: 195, label: 'Extraction', color: 'var(--cm-purple)' },
+			{ x: 330, label: 'Embedding', color: 'var(--cm-green)' },
+			{ x: 465, label: 'Storage', color: 'var(--cm-orange)' },
+			{ x: 600, label: 'Decay', color: 'var(--cm-pink)' },
+			{ x: 720, label: 'Retrieval', color: 'var(--cm-cyan)' },
+		].map(({ x, label, color }, i) => (
+			<g class={`stage s${i}`}>
+				<circle cx={x} cy="50" r="22" fill={color} opacity="0.15" stroke={color} stroke-width="2" class="stage-ring" />
+				<circle cx={x} cy="50" r="8" fill={color} class="stage-dot" />
+				<text x={x} y="95" text-anchor="middle" fill="var(--sl-color-gray-2)" font-size="11" font-weight="500">{label}</text>
+			</g>
+		))}
+
+		<!-- Arrows between stages -->
+		{[110, 245, 380, 515, 648].map((x, i) => (
+			<g class={`arrow a${i}`}>
+				<line x1={x - 20} y1="50" x2={x + 20} y2="50" stroke="var(--sl-color-gray-3)" stroke-width="1.5" stroke-dasharray="6 3" class="arrow-line" />
+				<polygon points={`${x + 20},45 ${x + 28},50 ${x + 20},55`} fill="var(--sl-color-gray-3)" opacity="0.7" />
+			</g>
+		))}
+	</svg>
+</div>
+
+<style>
+	.stage-ring {
+		animation: ring-pulse 6s ease-in-out infinite;
+	}
+	.stage-dot {
+		animation: dot-pulse 6s ease-in-out infinite;
+	}
+
+	.s0 .stage-ring, .s0 .stage-dot { animation-delay: 0s; }
+	.s1 .stage-ring, .s1 .stage-dot { animation-delay: 1s; }
+	.s2 .stage-ring, .s2 .stage-dot { animation-delay: 2s; }
+	.s3 .stage-ring, .s3 .stage-dot { animation-delay: 3s; }
+	.s4 .stage-ring, .s4 .stage-dot { animation-delay: 4s; }
+	.s5 .stage-ring, .s5 .stage-dot { animation-delay: 5s; }
+
+	@keyframes ring-pulse {
+		0%, 100% { opacity: 0.15; r: 22; }
+		16.7% { opacity: 0.4; r: 26; }
+		33% { opacity: 0.15; r: 22; }
+	}
+
+	@keyframes dot-pulse {
+		0%, 100% { r: 8; }
+		16.7% { r: 11; }
+		33% { r: 8; }
+	}
+
+	.arrow-line {
+		animation: dash-flow 1.5s linear infinite;
+	}
+	.a0 .arrow-line { animation-delay: 0.5s; }
+	.a1 .arrow-line { animation-delay: 1.5s; }
+	.a2 .arrow-line { animation-delay: 2.5s; }
+	.a3 .arrow-line { animation-delay: 3.5s; }
+	.a4 .arrow-line { animation-delay: 4.5s; }
+
+	@keyframes dash-flow {
+		to { stroke-dashoffset: -18; }
+	}
+</style>

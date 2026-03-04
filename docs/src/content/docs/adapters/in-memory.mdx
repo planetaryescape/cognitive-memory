@@ -3,79 +3,89 @@ title: InMemory Adapter
 description: Zero-config in-memory storage for testing and prototyping.
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 ## Overview
 
 The InMemory adapter stores all memories in Python dicts or JavaScript Maps. It requires zero configuration, has no external dependencies, and provides the fastest possible read/write performance.
 
 Data is lost when the process exits. This is intentional — use it for testing, prototyping, and single-session scripts.
 
-## Python
+## Usage
 
-```python
-from cognitive_memory import CognitiveMemory
-from cognitive_memory.adapters.memory import InMemoryAdapter
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    from cognitive_memory import CognitiveMemory
+    from cognitive_memory.adapters.memory import InMemoryAdapter
 
-# Default — InMemoryAdapter is used automatically
-mem = CognitiveMemory()
+    # Default — InMemoryAdapter is used automatically
+    mem = CognitiveMemory()
 
-# Explicit
-mem = CognitiveMemory(adapter=InMemoryAdapter())
-```
+    # Explicit
+    mem = CognitiveMemory(adapter=InMemoryAdapter())
+    ```
+  </TabItem>
+  <TabItem label="TypeScript">
+    ```typescript
+    import { CognitiveMemory, InMemoryAdapter } from "cognitive-memory";
 
-### Internal structure
+    const mem = new CognitiveMemory({
+        adapter: new InMemoryAdapter(),
+        embeddingProvider: myEmbedder,
+        userId: "user-123",
+    });
+    ```
+  </TabItem>
+</Tabs>
 
-The Python adapter uses three dicts for tiered storage:
+## Internals
 
-```python
-class InMemoryAdapter(MemoryAdapter):
-    def __init__(self):
-        self.hot: dict[str, Memory] = {}    # vector-searchable
-        self.cold: dict[str, Memory] = {}   # ID-only access
-        self.stubs: dict[str, Memory] = {}  # archived summaries
-```
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    The Python adapter uses three dicts for tiered storage:
 
-Vector search is brute-force cosine similarity over all hot memories. This is O(n) per query but fast enough for collections up to ~50,000 memories.
+    ```python
+    class InMemoryAdapter(MemoryAdapter):
+        def __init__(self):
+            self.hot: dict[str, Memory] = {}    # vector-searchable
+            self.cold: dict[str, Memory] = {}   # ID-only access
+            self.stubs: dict[str, Memory] = {}  # archived summaries
+    ```
 
-### Tiered storage behavior
+    Vector search is brute-force cosine similarity over all hot memories. This is O(n) per query but fast enough for collections up to ~50,000 memories.
 
-- `migrate_to_cold()`: Moves a memory from `hot` to `cold`, sets `is_cold=True`
-- `migrate_to_hot()`: Moves from `cold` back to `hot`, resets cold flags
-- `convert_to_stub()`: Creates a lightweight stub in `stubs`, removes from hot/cold
+    ### Tiered storage behavior
 
-### Associations
+    - `migrate_to_cold()`: Moves a memory from `hot` to `cold`, sets `is_cold=True`
+    - `migrate_to_hot()`: Moves from `cold` back to `hot`, resets cold flags
+    - `convert_to_stub()`: Creates a lightweight stub in `stubs`, removes from hot/cold
 
-Association links are stored directly on `Memory.associations` dicts. The adapter delegates link management to the engine, which modifies `Memory` objects in-place.
+    ### Associations
 
-## TypeScript
+    Association links are stored directly on `Memory.associations` dicts. The adapter delegates link management to the engine, which modifies `Memory` objects in-place.
+  </TabItem>
+  <TabItem label="TypeScript">
+    ### Constructor options
 
-```typescript
-import { CognitiveMemory, InMemoryAdapter } from "cognitive-memory";
+    ```typescript
+    const adapter = new InMemoryAdapter({
+        now: () => Date.now(),       // custom clock (useful for testing)
+        idFactory: () => randomUUID(), // custom ID generator
+    });
+    ```
 
-const mem = new CognitiveMemory({
-    adapter: new InMemoryAdapter(),
-    embeddingProvider: myEmbedder,
-    userId: "user-123",
-});
-```
+    The `now` option lets you control the clock during tests, so you can simulate time passing without waiting.
 
-### Constructor options
+    ### Internal structure
 
-```typescript
-const adapter = new InMemoryAdapter({
-    now: () => Date.now(),       // custom clock (useful for testing)
-    idFactory: () => randomUUID(), // custom ID generator
-});
-```
+    The TypeScript adapter uses:
+    - `Map<string, Memory>` for memory storage
+    - `Map<string, { strength, createdAt, updatedAt }>` for association links
 
-The `now` option lets you control the clock during tests, so you can simulate time passing without waiting.
-
-### Internal structure
-
-The TypeScript adapter uses:
-- `Map<string, Memory>` for memory storage
-- `Map<string, { strength, createdAt, updatedAt }>` for association links
-
-Link keys are stored as `"idA|idB"` (alphabetically sorted) to ensure bidirectional uniqueness.
+    Link keys are stored as `"idA|idB"` (alphabetically sorted) to ensure bidirectional uniqueness.
+  </TabItem>
+</Tabs>
 
 ## When to use
 

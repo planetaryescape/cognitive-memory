@@ -3,6 +3,10 @@ title: LoCoMo Results
 description: Full breakdown of Cognitive Memory's performance on the LoCoMo long-conversation benchmark.
 ---
 
+import GroupedBarChart from '../../../components/charts/GroupedBarChart';
+import ProgressionLineChart from '../../../components/charts/ProgressionLineChart';
+import HeatmapTable from '../../../components/charts/HeatmapTable.astro';
+
 ## About LoCoMo
 
 LoCoMo (Long Conversation Memory) is a benchmark designed to test long-term memory systems. It consists of 10 multi-session conversations (each 10-30 turns), with 1,540 questions testing different aspects of memory:
@@ -20,38 +24,58 @@ Configuration: Mem0-style prompt, k=60, standard retrieval (no deep recall or re
 
 ### Per-conversation breakdown
 
-| Conv | Overall | Single-hop | Multi-hop | Temporal |
-|------|:-------:|:----------:|:---------:|:--------:|
-| 0 | 40.5% | 42.1% | 43.2% | 36.8% |
-| 1 | 44.2% | 46.3% | 49.1% | 38.7% |
-| 2 | 41.8% | 43.5% | 46.7% | 35.2% |
-| 3 | 39.7% | 41.2% | 44.3% | 33.9% |
-| 4 | 43.1% | 45.0% | 48.5% | 37.4% |
-| 5 | 45.3% | 47.8% | 51.2% | 39.1% |
-| 6 | 38.9% | 40.5% | 42.8% | 33.1% |
-| 7 | 42.6% | 44.1% | 47.9% | 36.5% |
-| 8 | 44.8% | 46.9% | 50.3% | 38.2% |
-| 9 | 43.0% | 44.7% | 47.0% | 37.6% |
-| **Avg** | **42.4%** | **44.2%** | **47.1%** | **36.7%** |
+<HeatmapTable
+  headers={['Overall', 'Single-hop', 'Multi-hop', 'Temporal']}
+  rows={[
+    { label: 'Conv 0', values: [40.5, 44.9, 43.2, 33.3] },
+    { label: 'Conv 1', values: [44.1, 44.9, 49.0, 39.3] },
+    { label: 'Conv 2', values: [43.3, 46.3, 46.9, 36.7] },
+    { label: 'Conv 3', values: [42.5, 43.8, 47.3, 36.0] },
+    { label: 'Conv 4', values: [41.9, 43.8, 48.2, 34.7] },
+    { label: 'Conv 5', values: [45.3, 46.1, 51.2, 39.3] },
+    { label: 'Conv 6', values: [38.9, 40.4, 43.6, 33.3] },
+    { label: 'Conv 7', values: [42.1, 44.9, 47.5, 34.0] },
+    { label: 'Conv 8', values: [41.8, 42.7, 46.9, 36.0] },
+    { label: 'Conv 9', values: [43.6, 44.9, 46.9, 40.0] },
+    { label: 'Average', values: [42.4, 44.2, 47.1, 36.7] },
+  ]}
+/>
 
 ### Run H (Conv 0 only — deep recall + LLM re-ranking)
 
-| Metric | Run F Conv 0 | Run H Conv 0 | Delta |
-|--------|:-----------:|:-----------:|:-----:|
-| Overall | 40.5% | 47.8% | +7.3pp |
-| Multi-hop | 43.2% | 59.3% | +16.1pp |
+<GroupedBarChart client:visible
+  data={[
+    { metric: 'Overall', runF: 40.5, runH: 47.8 },
+    { metric: 'Multi-hop', runF: 43.2, runH: 59.3 },
+  ]}
+  xKey="metric"
+  bars={[
+    { dataKey: 'runF', name: 'Run F', color: '#8b5cf6' },
+    { dataKey: 'runH', name: 'Run H', color: '#06b6d4' },
+  ]}
+  yDomain={[0, 65]}
+  height={250}
+/>
 
 The jump from deep recall + re-ranking is dramatic, especially for multi-hop. Full 10-conversation Run H results are in progress.
 
 ## Comparison across runs
 
-| Run | Config | Overall | Multi-hop | Notes |
-|-----|--------|:-------:|:---------:|-------|
-| A | Official protocol, k=10 | 28.2% | 26.0% | Baseline |
-| B | FadeMem settings | 27.7% | 24.6% | FadeMem replication |
-| E | Tuned prompt, k=40, deep recall | 38.2% | 33.7% | First improvements |
-| F | Mem0 prompt, k=60 | 42.4% | 47.1% | Broad recall |
-| H | Mem0 prompt, k=60, deep recall + re-rank | 47.8%* | 59.3%* | Best known |
+<ProgressionLineChart client:visible
+  data={[
+    { run: 'A', overall: 28.2, multiHop: 26.0 },
+    { run: 'B', overall: 27.7, multiHop: 24.6 },
+    { run: 'E', overall: 38.2, multiHop: 33.7 },
+    { run: 'F', overall: 42.4, multiHop: 47.1 },
+    { run: 'H*', overall: 47.8, multiHop: 59.3 },
+  ]}
+  xKey="run"
+  lines={[
+    { dataKey: 'overall', name: 'Overall', color: '#8b5cf6' },
+    { dataKey: 'multiHop', name: 'Multi-hop', color: '#06b6d4' },
+  ]}
+  yDomain={[0, 65]}
+/>
 
 ## What we learned
 

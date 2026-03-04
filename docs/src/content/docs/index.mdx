@@ -14,23 +14,34 @@ hero:
       icon: external
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import MemoryLifecycle from '../../components/animations/MemoryLifecycle.astro';
+import PipelineDiagram from '../../components/animations/PipelineDiagram.astro';
+import DecayCurve from '../../components/animations/DecayCurve.astro';
+import GroupedBarChart from '../../components/charts/GroupedBarChart';
 
 ## Install in seconds
 
-```bash
-# Python
-pip install cognitive-memory
-
-# TypeScript
-npm install cognitive-memory
-```
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```bash
+    pip install cognitive-memory
+    ```
+  </TabItem>
+  <TabItem label="TypeScript">
+    ```bash
+    npm install cognitive-memory
+    ```
+  </TabItem>
+</Tabs>
 
 ## Why Cognitive Memory?
 
 Most memory systems treat memories as static documents in a vector database. Search, retrieve, done. But human memory is nothing like that. Memories fade over time, strengthen with repeated recall, form associative links, and consolidate into denser representations as they age.
 
 Cognitive Memory brings these dynamics to AI agents. The result: agents that naturally prioritize recent and frequently-accessed information, surface associated context through spreading activation, and gracefully forget irrelevant details instead of drowning in noise.
+
+<MemoryLifecycle />
 
 <CardGrid>
   <Card title="Ebbinghaus Decay" icon="down-caret">
@@ -47,53 +58,71 @@ Cognitive Memory brings these dynamics to AI agents. The result: agents that nat
   </Card>
 </CardGrid>
 
+<DecayCurve />
+
 ## Quick taste
 
-### Python
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    from cognitive_memory import SyncCognitiveMemory
 
-```python
-from cognitive_memory import SyncCognitiveMemory
+    mem = SyncCognitiveMemory()
 
-mem = SyncCognitiveMemory()
+    # Ingest from conversation
+    mem.extract_and_store(
+        "User: I'm allergic to peanuts and I just moved to Portland.",
+        session_id="s1",
+    )
 
-# Ingest from conversation
-mem.extract_and_store(
-    "User: I'm allergic to peanuts and I just moved to Portland.",
-    session_id="s1",
-)
+    # Search with decay-weighted scoring
+    results = mem.search("what is the user allergic to?")
+    for r in results:
+        print(f"{r.memory.content} (score={r.combined_score:.3f})")
+    ```
+  </TabItem>
+  <TabItem label="TypeScript">
+    ```typescript
+    import { CognitiveMemory, InMemoryAdapter } from "cognitive-memory";
 
-# Search with decay-weighted scoring
-results = mem.search("what is the user allergic to?")
-for r in results:
-    print(f"{r.memory.content} (score={r.combined_score:.3f})")
-```
+    const mem = new CognitiveMemory({
+      adapter: new InMemoryAdapter(),
+      embeddingProvider: myEmbedder,
+      userId: "user-123",
+    });
 
-### TypeScript
+    await mem.store({ content: "User is allergic to peanuts", memoryType: "semantic" });
 
-```typescript
-import { CognitiveMemory, InMemoryAdapter } from "cognitive-memory";
+    const results = await mem.retrieve({ query: "allergies" });
+    ```
+  </TabItem>
+</Tabs>
 
-const mem = new CognitiveMemory({
-  adapter: new InMemoryAdapter(),
-  embeddingProvider: myEmbedder,
-  userId: "user-123",
-});
+## Three-stage retrieval pipeline
 
-await mem.store({ content: "User is allergic to peanuts", memoryType: "semantic" });
-
-const results = await mem.retrieve({ query: "allergies" });
-```
+<PipelineDiagram />
 
 ## Benchmark results
 
 On the LoCoMo long-conversation benchmark (10 conversations, 1540 questions):
 
-| System | Overall | Multi-hop |
-|--------|---------|-----------|
-| **Cognitive Memory** | **42.4%** | **47.1%** |
-| Mem0 | 26.3% | 28.4% |
-| FadeMem | 27.2% | 29.4% |
-| Naive RAG | ~20% | ~15% |
+<GroupedBarChart
+  client:visible
+  data={[
+    { system: 'Cognitive Memory', overall: 42.4, multiHop: 47.1 },
+    { system: 'Mem0', overall: 26.3, multiHop: 28.4 },
+    { system: 'FadeMem', overall: 27.2, multiHop: 29.4 },
+    { system: 'Naive RAG', overall: 20, multiHop: 15 },
+  ]}
+  xKey="system"
+  bars={[
+    { dataKey: 'overall', name: 'Overall', color: '#8b5cf6' },
+    { dataKey: 'multiHop', name: 'Multi-hop', color: '#06b6d4' },
+  ]}
+  yLabel="Accuracy (%)"
+  yDomain={[0, 55]}
+  highlightFirst={true}
+/>
 
 Multi-hop questions require reasoning across multiple stored facts. This is where decay-weighted retrieval and associative linking shine — our multi-hop score beats Mem0 by 66% and FadeMem by 60%.
 

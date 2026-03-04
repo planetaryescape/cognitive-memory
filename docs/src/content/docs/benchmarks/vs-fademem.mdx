@@ -3,19 +3,37 @@ title: vs. FadeMem
 description: How Cognitive Memory compares to FadeMem on the LoCoMo benchmark.
 ---
 
+import GroupedBarChart from '../../../components/charts/GroupedBarChart';
+
 ## Head-to-head
 
-| Metric | Cognitive Memory | FadeMem | Delta |
-|--------|:----------------:|:-------:|:-----:|
-| Overall | 42.4% | 27.2% | **+15.2pp** (+56%) |
-| Multi-hop | 47.1% | 29.4% | **+17.7pp** (+60%) |
+<GroupedBarChart client:visible
+  data={[
+    { metric: 'Overall', cogMem: 42.4, fadeMem: 27.2 },
+    { metric: 'Multi-hop', cogMem: 47.1, fadeMem: 29.4 },
+  ]}
+  xKey="metric"
+  bars={[
+    { dataKey: 'cogMem', name: 'Cognitive Memory', color: '#8b5cf6' },
+    { dataKey: 'fadeMem', name: 'FadeMem', color: '#10b981' },
+  ]}
+  yDomain={[0, 55]}
+/>
 
 With deep recall + re-ranking (Run H, conv 0):
 
-| Metric | Cognitive Memory | FadeMem | Delta |
-|--------|:----------------:|:-------:|:-----:|
-| Overall | 47.8% | 27.2% | **+20.6pp** (+76%) |
-| Multi-hop | 59.3% | 29.4% | **+29.9pp** (+102%) |
+<GroupedBarChart client:visible
+  data={[
+    { metric: 'Overall', cogMem: 47.8, fadeMem: 27.2 },
+    { metric: 'Multi-hop', cogMem: 59.3, fadeMem: 29.4 },
+  ]}
+  xKey="metric"
+  bars={[
+    { dataKey: 'cogMem', name: 'Cognitive Memory (Run H)', color: '#8b5cf6' },
+    { dataKey: 'fadeMem', name: 'FadeMem', color: '#10b981' },
+  ]}
+  yDomain={[0, 65]}
+/>
 
 ## What FadeMem does
 

@@ -3,6 +3,8 @@ title: Adapters Overview
 description: Choose the right storage backend for your use case.
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 ## The adapter pattern
 
 Cognitive Memory separates the memory engine (decay, scoring, associations) from the storage backend. You pick an adapter that matches your infrastructure, and the engine works identically regardless of what's underneath.
@@ -60,26 +62,27 @@ Use `RedisAdapter`. Sub-millisecond reads, optional persistence with RDB/AOF. Go
 
 ## Usage pattern
 
-### Python
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    from cognitive_memory import CognitiveMemory
+    from cognitive_memory.adapters.memory import InMemoryAdapter
 
-```python
-from cognitive_memory import CognitiveMemory
-from cognitive_memory.adapters.memory import InMemoryAdapter
+    mem = CognitiveMemory(adapter=InMemoryAdapter())
+    ```
+  </TabItem>
+  <TabItem label="TypeScript">
+    ```typescript
+    import { CognitiveMemory, InMemoryAdapter } from "cognitive-memory";
 
-mem = CognitiveMemory(adapter=InMemoryAdapter())
-```
-
-### TypeScript
-
-```typescript
-import { CognitiveMemory, InMemoryAdapter } from "cognitive-memory";
-
-const mem = new CognitiveMemory({
-    adapter: new InMemoryAdapter(),
-    embeddingProvider: myEmbedder,
-    userId: "user-123",
-});
-```
+    const mem = new CognitiveMemory({
+        adapter: new InMemoryAdapter(),
+        embeddingProvider: myEmbedder,
+        userId: "user-123",
+    });
+    ```
+  </TabItem>
+</Tabs>
 
 ## Writing a custom adapter
 

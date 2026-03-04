@@ -3,16 +3,28 @@ title: Benchmark Overview
 description: How Cognitive Memory compares to Mem0, FadeMem, and naive RAG on the LoCoMo benchmark.
 ---
 
+import GroupedBarChart from '../../../components/charts/GroupedBarChart';
+import ProgressionLineChart from '../../../components/charts/ProgressionLineChart';
+
 ## At a glance
 
 Cognitive Memory was benchmarked against three baselines on the LoCoMo long-conversation dataset (10 conversations, 1540 questions):
 
-| System | Overall accuracy | Multi-hop accuracy |
-|--------|:---------------:|:------------------:|
-| **Cognitive Memory** | **42.4%** | **47.1%** |
-| Mem0 | 26.3% | 28.4% |
-| FadeMem | 27.2% | 29.4% |
-| Naive RAG | ~20% | ~15% |
+<GroupedBarChart client:visible
+  data={[
+    { system: 'Cognitive Memory', overall: 42.4, multiHop: 47.1 },
+    { system: 'Mem0', overall: 26.3, multiHop: 28.4 },
+    { system: 'FadeMem', overall: 27.2, multiHop: 29.4 },
+    { system: 'Naive RAG', overall: 20, multiHop: 15 },
+  ]}
+  xKey="system"
+  bars={[
+    { dataKey: 'overall', name: 'Overall', color: '#8b5cf6' },
+    { dataKey: 'multiHop', name: 'Multi-hop', color: '#06b6d4' },
+  ]}
+  yDomain={[0, 55]}
+  highlightFirst={true}
+/>
 
 ## What these numbers mean
 
@@ -40,15 +52,23 @@ The benchmark's best configuration adds an LLM re-ranking step after retrieval. 
 
 We ran multiple configurations to isolate the contribution of each mechanism:
 
-| Run | Config | Overall | Multi-hop |
-|-----|--------|:-------:|:---------:|
-| A | Official protocol (k=10) | 28.2% | 26.0% |
-| B | FadeMem-style settings | 27.7% | 24.6% |
-| E | Tuned prompt, k=40, deep recall | 38.2% | 33.7% |
-| F | Mem0 prompt, k=60 | 42.4% | 47.1% |
-| H | Mem0 prompt, k=60, deep recall + re-rank | 47.8%* | 59.3%* |
+<ProgressionLineChart client:visible
+  data={[
+    { run: 'A', overall: 28.2, multiHop: 26.0 },
+    { run: 'B', overall: 27.7, multiHop: 24.6 },
+    { run: 'E', overall: 38.2, multiHop: 33.7 },
+    { run: 'F', overall: 42.4, multiHop: 47.1 },
+    { run: 'H*', overall: 47.8, multiHop: 59.3 },
+  ]}
+  xKey="run"
+  lines={[
+    { dataKey: 'overall', name: 'Overall', color: '#8b5cf6' },
+    { dataKey: 'multiHop', name: 'Multi-hop', color: '#06b6d4' },
+  ]}
+  yDomain={[0, 65]}
+/>
 
-*Run H results are from conversation 0 only (full 10-conv run in progress).
+*Run H is conv 0 only
 
 Each jump tells a story:
 - A to E: tuned prompt and deep recall add +10pp overall

@@ -3,27 +3,29 @@ title: Postgres Adapter
 description: Production-grade storage with pgvector for fast similarity search.
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 ## Overview
 
 The Postgres adapter is the recommended choice for production deployments. It uses pgvector for hardware-accelerated vector similarity search, supports concurrent access, and scales to millions of memories.
 
 ## Installation
 
-### Python
-
-```bash
-pip install cognitive-memory[postgres]
-# or
-pip install cognitive-memory psycopg2-binary
-```
-
-### TypeScript
-
-```bash
-npm install cognitive-memory pg
-```
-
-The `pg` package is a peer dependency — install it alongside the SDK.
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```bash
+    pip install cognitive-memory[postgres]
+    # or
+    pip install cognitive-memory psycopg2-binary
+    ```
+  </TabItem>
+  <TabItem label="TypeScript">
+    ```bash
+    npm install cognitive-memory pg
+    ```
+    The `pg` package is a peer dependency — install it alongside the SDK.
+  </TabItem>
+</Tabs>
 
 ## Setup
 
@@ -41,35 +43,36 @@ CREATE EXTENSION IF NOT EXISTS vector;
 postgresql://user:password@localhost:5432/memories
 ```
 
-### Python usage
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    from cognitive_memory import CognitiveMemory
+    from cognitive_memory.adapters.postgres import PostgresAdapter
 
-```python
-from cognitive_memory import CognitiveMemory
-from cognitive_memory.adapters.postgres import PostgresAdapter
+    adapter = PostgresAdapter(
+        connection_string="postgresql://user:pass@localhost:5432/memories",
+        embedding_dimensions=1536,
+    )
+    mem = CognitiveMemory(adapter=adapter)
+    ```
+  </TabItem>
+  <TabItem label="TypeScript">
+    ```typescript
+    import { CognitiveMemory } from "cognitive-memory";
+    import { PostgresAdapter } from "cognitive-memory/adapters/postgres";
 
-adapter = PostgresAdapter(
-    connection_string="postgresql://user:pass@localhost:5432/memories",
-    embedding_dimensions=1536,
-)
-mem = CognitiveMemory(adapter=adapter)
-```
+    const adapter = new PostgresAdapter({
+        connectionString: process.env.DATABASE_URL!,
+    });
 
-### TypeScript usage
-
-```typescript
-import { CognitiveMemory } from "cognitive-memory";
-import { PostgresAdapter } from "cognitive-memory/adapters/postgres";
-
-const adapter = new PostgresAdapter({
-    connectionString: process.env.DATABASE_URL!,
-});
-
-const mem = new CognitiveMemory({
-    adapter,
-    embeddingProvider: myEmbedder,
-    userId: "user-123",
-});
-```
+    const mem = new CognitiveMemory({
+        adapter,
+        embeddingProvider: myEmbedder,
+        userId: "user-123",
+    });
+    ```
+  </TabItem>
+</Tabs>
 
 ## Schema
 

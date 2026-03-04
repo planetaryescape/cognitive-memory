@@ -3,12 +3,22 @@ title: vs. Naive RAG
 description: Why cognitive memory beats standard retrieval-augmented generation.
 ---
 
+import GroupedBarChart from '../../../components/charts/GroupedBarChart';
+
 ## Head-to-head
 
-| Metric | Cognitive Memory | Naive RAG | Delta |
-|--------|:----------------:|:---------:|:-----:|
-| Overall | 42.4% | ~20% | **+22pp** (+110%) |
-| Multi-hop | 47.1% | ~15% | **+32pp** (+214%) |
+<GroupedBarChart client:visible
+  data={[
+    { metric: 'Overall', cogMem: 42.4, rag: 20 },
+    { metric: 'Multi-hop', cogMem: 47.1, rag: 15 },
+  ]}
+  xKey="metric"
+  bars={[
+    { dataKey: 'cogMem', name: 'Cognitive Memory', color: '#8b5cf6' },
+    { dataKey: 'rag', name: 'Naive RAG', color: '#a1a1aa' },
+  ]}
+  yDomain={[0, 55]}
+/>
 
 ## What naive RAG does
 

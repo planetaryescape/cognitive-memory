@@ -3,6 +3,8 @@ title: Scoring Pipeline
 description: The complete retrieval pipeline from query to ranked results.
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 ## Overview
 
 When you call `search()` or `retrieve()`, the query goes through a multi-stage pipeline that combines vector similarity, temporal decay, associative expansion, and retrieval boosting to produce a ranked list of memories.
@@ -104,27 +106,32 @@ return all_results[:top_k]
 
 Each result in the returned list is a `SearchResult` (Python) or `ScoredMemory` (TypeScript):
 
-### Python SearchResult
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    SearchResult type:
 
-```python
-@dataclass
-class SearchResult:
-    memory: Memory           # the full memory object
-    relevance_score: float   # cosine similarity
-    retention_score: float   # R(m) from decay
-    combined_score: float    # relevance * retention^alpha
-    is_associative: bool     # came via association, not direct match
-    via_deep_recall: bool    # came from superseded memory in deep recall
-```
+    ```python
+    @dataclass
+    class SearchResult:
+        memory: Memory           # the full memory object
+        relevance_score: float   # cosine similarity
+        retention_score: float   # R(m) from decay
+        combined_score: float    # relevance * retention^alpha
+        is_associative: bool     # came via association, not direct match
+        via_deep_recall: bool    # came from superseded memory in deep recall
+    ```
+  </TabItem>
+  <TabItem label="TypeScript">
+    ScoredMemory type:
 
-### TypeScript ScoredMemory
-
-```typescript
-interface ScoredMemory extends Memory {
-    relevanceScore: number;  // cosine similarity
-    finalScore: number;      // relevance * retention
-}
-```
+    ```typescript
+    interface ScoredMemory extends Memory {
+        relevanceScore: number;  // cosine similarity
+        finalScore: number;      // relevance * retention
+    }
+    ```
+  </TabItem>
+</Tabs>
 
 ## Pipeline summary
 

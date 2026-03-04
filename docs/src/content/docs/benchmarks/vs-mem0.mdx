@@ -3,20 +3,38 @@ title: vs. Mem0
 description: How Cognitive Memory compares to Mem0 on the LoCoMo benchmark.
 ---
 
+import GroupedBarChart from '../../../components/charts/GroupedBarChart';
+
 ## Head-to-head
 
-| Metric | Cognitive Memory | Mem0 | Delta |
-|--------|:----------------:|:----:|:-----:|
-| Overall | 42.4% | 26.3% | **+16.1pp** (+61%) |
-| Multi-hop | 47.1% | 28.4% | **+18.7pp** (+66%) |
-| Single-hop | 44.2% | 28.1% | **+16.1pp** (+57%) |
+<GroupedBarChart client:visible
+  data={[
+    { metric: 'Overall', cogMem: 42.4, mem0: 26.3 },
+    { metric: 'Multi-hop', cogMem: 47.1, mem0: 28.4 },
+    { metric: 'Single-hop', cogMem: 44.2, mem0: 28.1 },
+  ]}
+  xKey="metric"
+  bars={[
+    { dataKey: 'cogMem', name: 'Cognitive Memory', color: '#8b5cf6' },
+    { dataKey: 'mem0', name: 'Mem0', color: '#f59e0b' },
+  ]}
+  yDomain={[0, 55]}
+/>
 
 With deep recall + re-ranking (Run H, conv 0):
 
-| Metric | Cognitive Memory | Mem0 | Delta |
-|--------|:----------------:|:----:|:-----:|
-| Overall | 47.8% | 26.3% | **+21.5pp** (+82%) |
-| Multi-hop | 59.3% | 28.4% | **+30.9pp** (+109%) |
+<GroupedBarChart client:visible
+  data={[
+    { metric: 'Overall', cogMem: 47.8, mem0: 26.3 },
+    { metric: 'Multi-hop', cogMem: 59.3, mem0: 28.4 },
+  ]}
+  xKey="metric"
+  bars={[
+    { dataKey: 'cogMem', name: 'Cognitive Memory (Run H)', color: '#8b5cf6' },
+    { dataKey: 'mem0', name: 'Mem0', color: '#f59e0b' },
+  ]}
+  yDomain={[0, 65]}
+/>
 
 ## What Mem0 does
 

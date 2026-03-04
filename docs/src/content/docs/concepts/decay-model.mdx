@@ -3,6 +3,8 @@ title: Decay Model
 description: The Ebbinghaus forgetting curve formula that drives memory retention over time.
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 ## The forgetting curve
 
 Cognitive Memory implements a modified Ebbinghaus forgetting curve. Every memory has a retention score R(m) that decays exponentially over time. The formula:
@@ -91,38 +93,39 @@ The core floor catches it at 60%.
 
 ## Implementation
 
-### Python
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    def compute_retention(self, memory: Memory, now: datetime) -> float:
+        if memory.is_stub:
+            return 0.0
 
-```python
-def compute_retention(self, memory: Memory, now: datetime) -> float:
-    if memory.is_stub:
-        return 0.0
+        last = memory.last_accessed_at or memory.created_at
+        dt_days = max(0.0, (now - last).total_seconds() / 86400.0)
 
-    last = memory.last_accessed_at or memory.created_at
-    dt_days = max(0.0, (now - last).total_seconds() / 86400.0)
+        beta_c = memory.base_decay_rate
+        if beta_c == float("inf"):
+            return 1.0  # procedural memories don't decay
 
-    beta_c = memory.base_decay_rate
-    if beta_c == float("inf"):
-        return 1.0  # procedural memories don't decay
+        S = max(memory.stability, 0.01)
+        B = min(1.0 + (memory.importance * 2.0), 3.0)
 
-    S = max(memory.stability, 0.01)
-    B = min(1.0 + (memory.importance * 2.0), 3.0)
+        effective_rate = S * B * beta_c
+        raw = math.exp(-dt_days / effective_rate)
 
-    effective_rate = S * B * beta_c
-    raw = math.exp(-dt_days / effective_rate)
-
-    return max(memory.floor, raw)
-```
-
-### TypeScript
-
-```typescript
-const daysSinceAccess = (Date.now() - lastAccessed) / (1000 * 60 * 60 * 24);
-const importanceBoost = 1.0 + importance * 2.0;
-const frequencyBoost = Math.min(2.0, 1.0 + Math.log1p(accessCount) * 0.1);
-const decayConstant = stability * importanceBoost * frequencyBoost * baseDecay;
-const retention = Math.exp(-daysSinceAccess / decayConstant);
-```
+        return max(memory.floor, raw)
+    ```
+  </TabItem>
+  <TabItem label="TypeScript">
+    ```typescript
+    const daysSinceAccess = (Date.now() - lastAccessed) / (1000 * 60 * 60 * 24);
+    const importanceBoost = 1.0 + importance * 2.0;
+    const frequencyBoost = Math.min(2.0, 1.0 + Math.log1p(accessCount) * 0.1);
+    const decayConstant = stability * importanceBoost * frequencyBoost * baseDecay;
+    const retention = Math.exp(-daysSinceAccess / decayConstant);
+    ```
+  </TabItem>
+</Tabs>
 
 Note: The TypeScript SDK includes an additional frequency boost factor that provides diminishing returns based on access count.
 

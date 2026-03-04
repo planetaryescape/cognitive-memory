@@ -3,6 +3,8 @@ title: Retrieval Scoring
 description: How retrieval results are scored using the R^alpha formula.
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 ## The scoring formula
 
 When you search for memories, each candidate is scored by combining semantic similarity with temporal retention:
@@ -79,20 +81,21 @@ config = CognitiveMemoryConfig(
 
 ## Implementation
 
-### Python
-
-```python
-def score_memory(self, memory, relevance, now):
-    retention = self.compute_retention(memory, now)
-    alpha = self.config.retrieval_score_exponent
-    return relevance * (retention ** alpha)
-```
-
-### TypeScript
-
-```typescript
-const retention = this.calculateRetentionFor({ ... });
-const finalScore = relevanceScore * retention;
-```
+<Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    def score_memory(self, memory, relevance, now):
+        retention = self.compute_retention(memory, now)
+        alpha = self.config.retrieval_score_exponent
+        return relevance * (retention ** alpha)
+    ```
+  </TabItem>
+  <TabItem label="TypeScript">
+    ```typescript
+    const retention = this.calculateRetentionFor({ ... });
+    const finalScore = relevanceScore * retention;
+    ```
+  </TabItem>
+</Tabs>
 
 Note: The TypeScript SDK currently uses alpha = 1.0 (raw retention). The Python SDK uses the configurable alpha exponent.

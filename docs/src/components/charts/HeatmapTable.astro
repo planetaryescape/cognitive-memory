@@ -1,0 +1,85 @@
+---
+/**
+ * CSS-based heatmap table for conversation breakdown data.
+ * Values are colored from red (low) through yellow to green (high).
+ */
+interface Props {
+  headers: string[];
+  rows: Array<{ label: string; values: number[] }>;
+  valueFormatter?: string;
+}
+
+const { headers, rows, valueFormatter = '%' } = Astro.props;
+
+function getHeatColor(value: number, min: number, max: number): string {
+  const ratio = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  // Red → Yellow → Green
+  const r = ratio < 0.5 ? 220 : Math.round(220 - (ratio - 0.5) * 2 * 170);
+  const g = ratio < 0.5 ? Math.round(80 + ratio * 2 * 140) : 220;
+  const b = 60;
+  return `rgba(${r}, ${g}, ${b}, 0.2)`;
+}
+
+// Find global min/max
+const allValues = rows.flatMap(r => r.values);
+const min = Math.min(...allValues);
+const max = Math.max(...allValues);
+---
+
+<div class="heatmap-container">
+  <table class="heatmap-table">
+    <thead>
+      <tr>
+        <th></th>
+        {headers.map(h => <th>{h}</th>)}
+      </tr>
+    </thead>
+    <tbody>
+      {rows.map(row => (
+        <tr>
+          <td class="row-label">{row.label}</td>
+          {row.values.map(v => (
+            <td style={`background: ${getHeatColor(v, min, max)}`}>
+              {v}{valueFormatter}
+            </td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .heatmap-container {
+    margin: 1.5rem 0;
+    overflow-x: auto;
+  }
+  .heatmap-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--sl-text-sm);
+  }
+  .heatmap-table th {
+    padding: 0.5rem 0.75rem;
+    text-align: center;
+    color: var(--sl-color-gray-2);
+    font-weight: 600;
+    border-bottom: 2px solid var(--sl-color-gray-5);
+  }
+  .heatmap-table td {
+    padding: 0.5rem 0.75rem;
+    text-align: center;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    font-variant-numeric: tabular-nums;
+    transition: background 0.2s;
+  }
+  .row-label {
+    text-align: left !important;
+    font-weight: 500;
+    color: var(--sl-color-gray-2);
+    background: transparent !important;
+  }
+  .heatmap-table tr:hover td {
+    opacity: 0.9;
+  }
+</style>

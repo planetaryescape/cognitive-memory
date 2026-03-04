@@ -1,0 +1,133 @@
+---
+import type { Props } from '@astrojs/starlight/props';
+import Default from '@astrojs/starlight/components/Hero.astro';
+
+const { data } = Astro.locals.starlightRoute.entry;
+const isSplash = data.template === 'splash';
+---
+
+{isSplash ? (
+<div class="hero-wrapper">
+	<div class="hero-badge">47.1% multi-hop accuracy — 66% ahead of Mem0</div>
+	<div class="hero-with-visual">
+		<div class="hero-default">
+			<Default {...Astro.props}><slot /></Default>
+		</div>
+		<div class="hero-visual">
+			<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" class="hero-graph" aria-label="Animated memory graph showing interconnected memory nodes">
+				<defs>
+					<radialGradient id="glow" cx="50%" cy="50%" r="50%">
+						<stop offset="0%" stop-color="var(--cm-purple)" stop-opacity="0.15" />
+						<stop offset="100%" stop-color="var(--cm-purple)" stop-opacity="0" />
+					</radialGradient>
+				</defs>
+				<circle cx="200" cy="200" r="180" fill="url(#glow)" />
+
+				<!-- Connection lines -->
+				<g stroke="var(--cm-purple)" stroke-width="1.5" fill="none" opacity="0.4">
+					<line x1="200" y1="100" x2="120" y2="200" class="conn c1" />
+					<line x1="200" y1="100" x2="280" y2="200" class="conn c2" />
+					<line x1="200" y1="100" x2="200" y2="220" class="conn c3" />
+					<line x1="120" y1="200" x2="200" y2="300" class="conn c4" />
+					<line x1="280" y1="200" x2="200" y2="300" class="conn c5" />
+					<line x1="120" y1="200" x2="280" y2="200" class="conn c6" />
+					<line x1="80" y1="280" x2="120" y2="200" class="conn c7" />
+					<line x1="320" y1="280" x2="280" y2="200" class="conn c8" />
+					<line x1="80" y1="280" x2="200" y2="300" class="conn c9" />
+					<line x1="320" y1="280" x2="200" y2="300" class="conn c10" />
+				</g>
+
+				<!-- Memory nodes -->
+				<circle cx="200" cy="100" r="18" fill="var(--cm-purple)" opacity="0.9" class="node n1" />
+				<text x="200" y="105" text-anchor="middle" fill="white" font-size="11" font-weight="600">Core</text>
+				<circle cx="120" cy="200" r="14" fill="var(--cm-cyan)" opacity="0.8" class="node n2" />
+				<circle cx="280" cy="200" r="14" fill="var(--cm-cyan)" opacity="0.8" class="node n3" />
+				<circle cx="200" cy="220" r="12" fill="var(--cm-green)" opacity="0.7" class="node n4" />
+				<circle cx="200" cy="300" r="10" fill="var(--cm-orange)" opacity="0.5" class="node n5" />
+				<circle cx="80" cy="280" r="8" fill="var(--sl-color-gray-3)" opacity="0.3" class="node n6" />
+				<circle cx="320" cy="280" r="8" fill="var(--sl-color-gray-3)" opacity="0.3" class="node n7" />
+
+				<!-- Floating particles -->
+				<circle cx="150" cy="140" r="3" fill="var(--cm-purple)" opacity="0.3" class="particle p1" />
+				<circle cx="260" cy="150" r="3" fill="var(--cm-cyan)" opacity="0.3" class="particle p2" />
+				<circle cx="170" cy="260" r="3" fill="var(--cm-green)" opacity="0.3" class="particle p3" />
+				<circle cx="240" cy="260" r="3" fill="var(--cm-orange)" opacity="0.3" class="particle p4" />
+			</svg>
+		</div>
+	</div>
+</div>
+) : (
+<Default {...Astro.props}><slot /></Default>
+)}
+
+<style>
+	.hero-wrapper {
+		text-align: center;
+	}
+
+	.hero-with-visual {
+		display: grid;
+		align-items: center;
+		gap: 2rem;
+	}
+
+	.hero-visual {
+		display: none;
+	}
+
+	.hero-graph {
+		width: 100%;
+		max-width: 22rem;
+		height: auto;
+	}
+
+	/* Node pulse */
+	.node { animation: pulse 3s ease-in-out infinite; }
+	.n1 { animation-delay: 0s; }
+	.n2 { animation-delay: 0.5s; }
+	.n3 { animation-delay: 1s; }
+	.n4 { animation-delay: 1.5s; }
+	.n5 { animation-delay: 2s; }
+	.n6 { animation-delay: 2.5s; }
+	.n7 { animation-delay: 0.3s; }
+
+	@keyframes pulse {
+		0%, 100% { filter: brightness(1); }
+		50% { filter: brightness(1.4); }
+	}
+
+	/* Connection flow */
+	.conn { stroke-dasharray: 8 4; animation: flow 2s linear infinite; }
+	.c1 { animation-delay: 0s; } .c2 { animation-delay: 0.2s; }
+	.c3 { animation-delay: 0.4s; } .c4 { animation-delay: 0.6s; }
+	.c5 { animation-delay: 0.8s; } .c6 { animation-delay: 1s; }
+	.c7 { animation-delay: 1.2s; } .c8 { animation-delay: 1.4s; }
+	.c9 { animation-delay: 1.6s; } .c10 { animation-delay: 1.8s; }
+
+	@keyframes flow { to { stroke-dashoffset: -24; } }
+
+	/* Floating particles */
+	.particle { animation: float 4s ease-in-out infinite; }
+	.p1 { animation-delay: 0s; } .p2 { animation-delay: 1s; }
+	.p3 { animation-delay: 2s; } .p4 { animation-delay: 3s; }
+
+	@keyframes float {
+		0%, 100% { transform: translate(0, 0); opacity: 0.3; }
+		50% { transform: translate(5px, -8px); opacity: 0.6; }
+	}
+
+	@media (min-width: 50rem) {
+		.hero-wrapper {
+			text-align: start;
+		}
+		.hero-with-visual {
+			grid-template-columns: 7fr 4fr;
+			gap: 3%;
+		}
+		.hero-visual {
+			display: flex;
+			justify-content: center;
+			order: 2;
+		}
+	}
+</style>
