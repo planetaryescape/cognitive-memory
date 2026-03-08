@@ -96,7 +96,8 @@ class MemoryExtractor:
     def _call_llm(self, prompt: str, max_tokens: int = 1000) -> str:
         import time as _time
         client = self._get_client()
-        for attempt in range(3):
+        max_retries = 5
+        for attempt in range(max_retries):
             try:
                 resp = client.chat.completions.create(
                     model=self.config.extraction_model,
@@ -106,8 +107,11 @@ class MemoryExtractor:
                 )
                 return resp.choices[0].message.content.strip()
             except Exception as e:
-                if attempt < 2 and ("500" in str(e) or "server_error" in str(e)):
-                    _time.sleep(2 ** attempt)
+                err_str = str(e).lower()
+                is_retryable = any(k in err_str for k in ("500", "server_error", "502", "503", "529", "rate_limit", "timeout", "connection"))
+                if attempt < max_retries - 1 and is_retryable:
+                    delay = min(60, 2 ** attempt * 2)
+                    _time.sleep(delay)
                     continue
                 raise
 
@@ -202,6 +206,37 @@ class MemoryExtractor:
             if label in raw_upper:
                 return label
         return "NONE"
+
+    def extract_raw_turns(
+        self,
+        conversation_text: str,
+        session_id: str,
+        timestamp: datetime,
+    ) -> list[Memory]:
+        """
+        Parse conversation into individual turns and store each verbatim.
+        No LLM extraction — preserves exact dialog for granular retrieval.
+        """
+        lines = conversation_text.strip().split("\n")
+        memories = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # Skip header lines like "[This conversation took place on ...]"
+            if line.startswith("[") and line.endswith("]"):
+                continue
+            mem = Memory(
+                content=line,
+                category=MemoryCategory.EPISODIC,
+                importance=0.5,
+                stability=0.2,
+                created_at=timestamp,
+                last_accessed_at=timestamp,
+            )
+            mem.session_ids.add(session_id)
+            memories.append(mem)
+        return memories
 
     def compress_memories(self, contents: list[str]) -> str:
         """Compress a group of memories into a summary."""

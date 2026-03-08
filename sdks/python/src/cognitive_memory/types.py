@@ -79,6 +79,7 @@ class CognitiveMemoryConfig:
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     custom_extraction_instructions: Optional[str] = None
+    extraction_mode: str = "semantic"  # "raw" | "semantic" | "hybrid"
 
 
 @dataclass

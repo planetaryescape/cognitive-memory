@@ -1,19 +1,35 @@
 /**
  * Cognitive Memory System - Decay Calculations
  *
- * Implements Ebbinghaus forgetting curve and spaced repetition mechanics.
+ * Implements Ebbinghaus forgetting curve with retention floors
+ * and spaced repetition mechanics.
  */
 
-import type { DecayParameters, MemoryType } from "./types";
+import type {
+  DecayParameters,
+  MemoryCategory,
+  ResolvedCognitiveMemoryConfig,
+} from "./types";
+import { DEFAULT_CONFIG, getBaseDecayRate, getRetentionFloor } from "./types";
 
 /**
- * Base decay rates (in days) for different memory types
+ * Base decay rates (in days) for different memory categories
+ * Matches Python SDK Table 2
  */
-export const BASE_DECAY_RATES: Record<MemoryType, number> = {
-  episodic: 30, // Events fade over ~30 days
-  semantic: 90, // Facts persist ~90 days
-  procedural: Number.POSITIVE_INFINITY, // Skills don't decay
+export const BASE_DECAY_RATES: Record<MemoryCategory, number> = {
+  episodic: 45,
+  semantic: 120,
+  procedural: Number.POSITIVE_INFINITY,
+  core: 120,
 };
+
+/**
+ * Decay floors by category type
+ */
+export const DECAY_FLOORS = {
+  core: 0.60,
+  regular: 0.02,
+} as const;
 
 function assertUnitInterval(field: string, value: number) {
   if (Number.isNaN(value) || value < 0 || value > 1) {
@@ -24,28 +40,39 @@ function assertUnitInterval(field: string, value: number) {
 /**
  * Calculate current retention level (0.0-1.0) for a memory
  *
- * Uses Ebbinghaus forgetting curve with importance and stability modifiers:
- * retention = e^(-t / (S × importance_boost × base_decay))
+ * Equation 1 from the paper:
+ * R(m) = max(floor, exp(-dt / (S * B * beta_c)))
  *
  * Where:
- * - t = days since last access
+ * - dt = days since last access
  * - S = stability (0.0-1.0, grows with retrievals)
- * - importance_boost = 1 + (importance × 2)
- * - base_decay = memory type specific (30/90/∞)
- *
- * @param params Decay calculation parameters
- * @returns Retention score (0.0-1.0)
+ * - B = importance boost = 1 + (importance * 2), capped at 3.0
+ * - beta_c = category-specific base decay rate
+ * - floor = 0.60 for core, 0.02 for regular
  */
-export function calculateRetention(params: DecayParameters): number {
-  const { stability, importance, lastAccessed, memoryType } = params;
+export function calculateRetention(
+  params: DecayParameters,
+  config?: Partial<ResolvedCognitiveMemoryConfig>,
+): number {
+  const { stability, importance, lastAccessed } = params;
+  const category = params.category ?? (params.memoryType as MemoryCategory) ?? "semantic";
 
   assertUnitInterval("stability", stability);
   assertUnitInterval("importance", importance);
 
+  const rates = config?.decayRates ?? DEFAULT_CONFIG.decayRates;
+  const baseDecay = getBaseDecayRate(category, rates);
+
   // Procedural memories never decay
-  if (memoryType === "procedural") {
+  if (category === "procedural" || baseDecay === Number.POSITIVE_INFINITY) {
     return 1.0;
   }
+
+  // Get retention floor
+  const floor = getRetentionFloor(category, {
+    coreRetentionFloor: config?.coreRetentionFloor ?? DEFAULT_CONFIG.coreRetentionFloor,
+    regularRetentionFloor: config?.regularRetentionFloor ?? DEFAULT_CONFIG.regularRetentionFloor,
+  });
 
   // Calculate days since last access
   const now = Date.now();
@@ -55,69 +82,45 @@ export function calculateRetention(params: DecayParameters): number {
   );
 
   // Importance boosts decay resistance (multiplier: 1.0 to 3.0)
-  const importanceBoost = 1.0 + importance * 2.0;
+  const importanceBoost = Math.min(3.0, 1.0 + importance * 2.0);
 
-  // Access frequency boosts decay resistance with diminishing returns.
-  const accessCountRaw =
-    typeof params.accessCount === "number" &&
-    Number.isFinite(params.accessCount)
-      ? params.accessCount
-      : 0;
-  const accessCount = Math.max(0, accessCountRaw);
-  const frequencyBoost = Math.min(2.0, 1.0 + Math.log1p(accessCount) * 0.1);
-
-  // Get base decay rate for memory type
-  const baseDecay = BASE_DECAY_RATES[memoryType];
+  // Stability (avoid division by zero)
+  const S = Math.max(stability, 0.01);
 
   // Combined decay constant
-  const decayConstant =
-    stability * importanceBoost * frequencyBoost * baseDecay;
-
-  // Prevent division by zero / degenerate cases
-  if (decayConstant < 0.1) {
-    return Math.max(0, 1.0 - daysSinceAccess / 10);
-  }
+  const effectiveRate = S * importanceBoost * baseDecay;
 
   // Exponential decay (Ebbinghaus curve)
-  const retention = Math.exp(-daysSinceAccess / decayConstant);
+  const raw = Math.exp(-daysSinceAccess / effectiveRate);
 
-  // Clamp to [0, 1]
-  return Math.max(0, Math.min(1, retention));
+  // Apply floor
+  return Math.max(floor, Math.min(1, raw));
 }
 
 /**
  * Update stability after a retrieval (spaced repetition)
  *
- * Implements spaced repetition: longer gaps between retrievals
- * produce larger stability increases.
- *
  * Formula:
- * new_stability = min(1.0, old_stability + 0.1 × spacing_bonus)
- * spacing_bonus = min(2.0, days_since_last_access / 7)
- *
- * @param currentStability Current stability level (0.0-1.0)
- * @param daysSinceLastAccess Days since this memory was last accessed
- * @returns New stability level (0.0-1.0)
+ * new_stability = min(1.0, old_stability + boost * spacing_factor)
+ * spacing_factor = min(maxMultiplier, days_since_last_access / intervalDays)
  */
 export function updateStability(
   currentStability: number,
   daysSinceLastAccess: number,
+  boost: number = 0.1,
+  maxMultiplier: number = 2.0,
+  intervalDays: number = 7.0,
 ): number {
   assertUnitInterval("stability", currentStability);
 
   const days = Math.max(0, daysSinceLastAccess);
 
-  // Calculate spacing bonus (capped at 2x)
-  // Retrieving after 7 days = 1x bonus
-  // Retrieving after 14+ days = 2x bonus (max)
-  const spacingBonus = Math.min(2.0, days / 7);
+  // Calculate spacing factor
+  const spacingFactor = Math.min(maxMultiplier, days / intervalDays);
 
-  // Base stability increase is 0.1
-  const stabilityIncrease = 0.1 * spacingBonus;
+  // Stability increase
+  const stabilityIncrease = boost * spacingFactor;
 
-  // Add to current stability
-  const newStability = currentStability + stabilityIncrease;
-
-  // Cap at 1.0 (maximum stability)
-  return Math.min(1.0, newStability);
+  // Cap at 1.0
+  return Math.min(1.0, currentStability + stabilityIncrease);
 }

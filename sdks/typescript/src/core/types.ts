@@ -6,13 +6,29 @@
  */
 
 /**
- * Memory types with different decay characteristics
+ * Memory categories with different decay characteristics
  *
- * - Episodic: Events with time/place context (30-day base decay)
- * - Semantic: Facts without temporal context (90-day base decay)
+ * - Episodic: Events with time/place context (45-day base decay)
+ * - Semantic: Facts without temporal context (120-day base decay)
  * - Procedural: Skills and how-to knowledge (no decay, updated by correction)
+ * - Core: Identity-level facts with high retention floor (120-day base decay)
+ */
+export type MemoryCategory = "episodic" | "semantic" | "procedural" | "core";
+
+/**
+ * @deprecated Use MemoryCategory instead
  */
 export type MemoryType = "episodic" | "semantic" | "procedural";
+
+/**
+ * Bidirectional association between two memories
+ */
+export interface Association {
+  targetId: string;
+  weight: number;
+  lastCoRetrieval: number | null;
+  createdAt: number;
+}
 
 /**
  * Base memory interface with cognitive metadata
@@ -30,7 +46,12 @@ export interface Memory {
   /** Vector embedding for semantic search */
   embedding: number[];
 
-  /** Type of memory (affects decay rate) */
+  /** Category of memory (affects decay rate and floor) */
+  category: MemoryCategory;
+
+  /**
+   * @deprecated Use `category` instead. Kept for backward compatibility.
+   */
   memoryType: MemoryType;
 
   /** Importance score (0.0-1.0, affects decay resistance) */
@@ -56,6 +77,33 @@ export interface Memory {
 
   /** Optional metadata */
   metadata?: Record<string, unknown>;
+
+  /** Associations to other memories (keyed by target memory ID) */
+  associations: Record<string, Association>;
+
+  /** Session IDs that accessed this memory (for core promotion) */
+  sessionIds: string[];
+
+  /** Whether this memory is in cold storage */
+  isCold: boolean;
+
+  /** Timestamp when moved to cold storage */
+  coldSince: number | null;
+
+  /** Consecutive days at retention floor */
+  daysAtFloor: number;
+
+  /** Whether this memory was superseded by a consolidation summary */
+  isSuperseded: boolean;
+
+  /** ID of the summary memory that superseded this one */
+  supersededBy: string | null;
+
+  /** Whether this memory is an archived stub */
+  isStub: boolean;
+
+  /** ID of memory that contradicts this one */
+  contradictedBy: string | null;
 }
 
 /**
@@ -65,7 +113,12 @@ export interface MemoryInput {
   /** Memory content */
   content: string;
 
-  /** Type of memory */
+  /** Category of memory */
+  category?: MemoryCategory;
+
+  /**
+   * @deprecated Use `category` instead
+   */
   memoryType?: MemoryType;
 
   /** Importance (0.0-1.0), auto-scored if not provided */
@@ -91,21 +144,44 @@ export interface RetrievalQuery {
   /** Minimum retention threshold (0.0-1.0) */
   minRetention?: number;
 
-  /** Filter by memory types */
+  /** Filter by memory categories */
+  categories?: MemoryCategory[];
+
+  /**
+   * @deprecated Use `categories` instead
+   */
   memoryTypes?: MemoryType[];
 
   /** Include associatively linked memories */
   includeAssociations?: boolean;
+
+  /** Session ID for tracking */
+  sessionId?: string;
+
+  /** Enable deep recall (include superseded memories) */
+  deepRecall?: boolean;
 }
 
 /**
- * Memory with retrieval score
+ * A scored memory from retrieval
+ */
+export interface SearchResult {
+  memory: Memory;
+  relevanceScore: number;
+  retentionScore: number;
+  combinedScore: number;
+  isAssociative: boolean;
+  viaDeepRecall: boolean;
+}
+
+/**
+ * Memory with retrieval score (backward compat)
  */
 export interface ScoredMemory extends Memory {
   /** Semantic similarity score */
   relevanceScore: number;
 
-  /** Final score (relevance × retention) */
+  /** Final score (relevance x retention) */
   finalScore: number;
 }
 
@@ -170,8 +246,26 @@ export interface DecayParameters {
   /** Timestamp of last access */
   lastAccessed: number;
 
-  /** Memory type */
-  memoryType: MemoryType;
+  /** Memory category */
+  category: MemoryCategory;
+
+  /**
+   * @deprecated Use `category` instead
+   */
+  memoryType?: MemoryType;
+}
+
+/**
+ * Memory system stats
+ */
+export interface MemoryStats {
+  total: number;
+  hot: number;
+  cold: number;
+  stub: number;
+  core: number;
+  faint: number;
+  avgRetention: number;
 }
 
 /**
@@ -181,20 +275,259 @@ export interface CognitiveMemoryConfig {
   /** User ID this memory system belongs to */
   userId: string;
 
-  /** Default importance for new memories */
+  // -- Decay --
+
+  /** Default importance for new memories (0.0-1.0) */
   defaultImportance?: number;
 
-  /** Default stability for new memories */
+  /** Default stability for new memories (0.0-1.0) */
   defaultStability?: number;
 
   /** Minimum retention for retrieval */
   minRetention?: number;
 
-  /** Base decay days by memory type */
-  decayRates?: {
-    episodic?: number;
-    semantic?: number;
-    procedural?: number;
+  /** Threshold below which memories are considered "faint" */
+  faintThreshold?: number;
+
+  /** Base decay days by memory category */
+  decayRates?: Partial<Record<MemoryCategory, number>>;
+
+  // -- Retention floors --
+
+  /** Retention floor for core memories (default: 0.60) */
+  coreRetentionFloor?: number;
+
+  /** Retention floor for regular memories (default: 0.02) */
+  regularRetentionFloor?: number;
+
+  // -- Retrieval scoring --
+
+  /** Alpha exponent in R^alpha scoring (default: 0.3) */
+  retrievalScoreExponent?: number;
+
+  // -- Retrieval boosting --
+
+  /** Direct retrieval stability boost (default: 0.1) */
+  directBoost?: number;
+
+  /** Associative retrieval stability boost (default: 0.03) */
+  associativeBoost?: number;
+
+  /** Max spaced repetition multiplier (default: 2.0) */
+  maxSpacedRepMultiplier?: number;
+
+  /** Spaced repetition interval in days (default: 7.0) */
+  spacedRepIntervalDays?: number;
+
+  // -- Core promotion --
+
+  /** Access count threshold for core promotion (default: 10) */
+  coreAccessThreshold?: number;
+
+  /** Stability threshold for core promotion (default: 0.85) */
+  coreStabilityThreshold?: number;
+
+  /** Session count threshold for core promotion (default: 3) */
+  coreSessionThreshold?: number;
+
+  // -- Associations --
+
+  /** Amount to strengthen associations on co-retrieval (default: 0.1) */
+  associationStrengthenAmount?: number;
+
+  /** Minimum association weight for retrieval (default: 0.3) */
+  associationRetrievalThreshold?: number;
+
+  /** Association decay time constant in days (default: 90) */
+  associationDecayConstantDays?: number;
+
+  // -- Consolidation --
+
+  /** Retention threshold below which memories are candidates (default: 0.20) */
+  consolidationRetentionThreshold?: number;
+
+  /** Minimum group size for consolidation (default: 5) */
+  consolidationGroupSize?: number;
+
+  /** Cosine similarity threshold for grouping (default: 0.70) */
+  consolidationSimilarityThreshold?: number;
+
+  // -- Tiered storage --
+
+  /** Days at floor before cold migration (default: 7) */
+  coldMigrationDays?: number;
+
+  /** Days in cold storage before TTL expiry (default: 180) */
+  coldStorageTtlDays?: number;
+
+  // -- Deep recall --
+
+  /** Score penalty multiplier for superseded memories (default: 0.5) */
+  deepRecallPenalty?: number;
+
+  // -- Ingestion --
+
+  /** Run maintenance (tick) during ingestion (default: true) */
+  runMaintenanceDuringIngestion?: boolean;
+
+  // -- Models --
+
+  /** LLM model for extraction (default: "gpt-4o-mini") */
+  extractionModel?: string;
+
+  /** Embedding model (default: "text-embedding-3-small") */
+  embeddingModel?: string;
+
+  /** Embedding dimensions (default: 1536) */
+  embeddingDimensions?: number;
+
+  /** Custom instructions prepended to extraction prompt */
+  customExtractionInstructions?: string | null;
+
+  /** Extraction mode: "raw" stores turns verbatim, "semantic" uses LLM extraction, "hybrid" does both */
+  extractionMode?: "raw" | "semantic" | "hybrid";
+}
+
+/**
+ * Resolved config with all defaults applied
+ */
+export interface ResolvedCognitiveMemoryConfig {
+  userId: string;
+
+  defaultImportance: number;
+  defaultStability: number;
+  minRetention: number;
+  faintThreshold: number;
+  decayRates: Record<MemoryCategory, number>;
+
+  coreRetentionFloor: number;
+  regularRetentionFloor: number;
+
+  retrievalScoreExponent: number;
+
+  directBoost: number;
+  associativeBoost: number;
+  maxSpacedRepMultiplier: number;
+  spacedRepIntervalDays: number;
+
+  coreAccessThreshold: number;
+  coreStabilityThreshold: number;
+  coreSessionThreshold: number;
+
+  associationStrengthenAmount: number;
+  associationRetrievalThreshold: number;
+  associationDecayConstantDays: number;
+
+  consolidationRetentionThreshold: number;
+  consolidationGroupSize: number;
+  consolidationSimilarityThreshold: number;
+
+  coldMigrationDays: number;
+  coldStorageTtlDays: number;
+
+  deepRecallPenalty: number;
+
+  runMaintenanceDuringIngestion: boolean;
+
+  extractionModel: string;
+  embeddingModel: string;
+  embeddingDimensions: number;
+  customExtractionInstructions: string | null;
+  extractionMode: "raw" | "semantic" | "hybrid";
+}
+
+/**
+ * Default config values matching Python SDK
+ */
+export const DEFAULT_CONFIG: Omit<ResolvedCognitiveMemoryConfig, "userId"> = {
+  defaultImportance: 0.5,
+  defaultStability: 0.3,
+  minRetention: 0.2,
+  faintThreshold: 0.15,
+  decayRates: {
+    episodic: 45,
+    semantic: 120,
+    procedural: Number.POSITIVE_INFINITY,
+    core: 120,
+  },
+
+  coreRetentionFloor: 0.60,
+  regularRetentionFloor: 0.02,
+
+  retrievalScoreExponent: 0.3,
+
+  directBoost: 0.1,
+  associativeBoost: 0.03,
+  maxSpacedRepMultiplier: 2.0,
+  spacedRepIntervalDays: 7.0,
+
+  coreAccessThreshold: 10,
+  coreStabilityThreshold: 0.85,
+  coreSessionThreshold: 3,
+
+  associationStrengthenAmount: 0.1,
+  associationRetrievalThreshold: 0.3,
+  associationDecayConstantDays: 90,
+
+  consolidationRetentionThreshold: 0.20,
+  consolidationGroupSize: 5,
+  consolidationSimilarityThreshold: 0.70,
+
+  coldMigrationDays: 7,
+  coldStorageTtlDays: 180,
+
+  deepRecallPenalty: 0.5,
+
+  runMaintenanceDuringIngestion: true,
+
+  extractionModel: "gpt-4o-mini",
+  embeddingModel: "text-embedding-3-small",
+  embeddingDimensions: 1536,
+  customExtractionInstructions: null,
+  extractionMode: "semantic",
+};
+
+/**
+ * Resolve partial config into full config with defaults
+ */
+export function resolveConfig(
+  config: CognitiveMemoryConfig,
+): ResolvedCognitiveMemoryConfig {
+  return {
+    userId: config.userId,
+    defaultImportance: config.defaultImportance ?? DEFAULT_CONFIG.defaultImportance,
+    defaultStability: config.defaultStability ?? DEFAULT_CONFIG.defaultStability,
+    minRetention: config.minRetention ?? DEFAULT_CONFIG.minRetention,
+    faintThreshold: config.faintThreshold ?? DEFAULT_CONFIG.faintThreshold,
+    decayRates: {
+      ...DEFAULT_CONFIG.decayRates,
+      ...config.decayRates,
+    },
+    coreRetentionFloor: config.coreRetentionFloor ?? DEFAULT_CONFIG.coreRetentionFloor,
+    regularRetentionFloor: config.regularRetentionFloor ?? DEFAULT_CONFIG.regularRetentionFloor,
+    retrievalScoreExponent: config.retrievalScoreExponent ?? DEFAULT_CONFIG.retrievalScoreExponent,
+    directBoost: config.directBoost ?? DEFAULT_CONFIG.directBoost,
+    associativeBoost: config.associativeBoost ?? DEFAULT_CONFIG.associativeBoost,
+    maxSpacedRepMultiplier: config.maxSpacedRepMultiplier ?? DEFAULT_CONFIG.maxSpacedRepMultiplier,
+    spacedRepIntervalDays: config.spacedRepIntervalDays ?? DEFAULT_CONFIG.spacedRepIntervalDays,
+    coreAccessThreshold: config.coreAccessThreshold ?? DEFAULT_CONFIG.coreAccessThreshold,
+    coreStabilityThreshold: config.coreStabilityThreshold ?? DEFAULT_CONFIG.coreStabilityThreshold,
+    coreSessionThreshold: config.coreSessionThreshold ?? DEFAULT_CONFIG.coreSessionThreshold,
+    associationStrengthenAmount: config.associationStrengthenAmount ?? DEFAULT_CONFIG.associationStrengthenAmount,
+    associationRetrievalThreshold: config.associationRetrievalThreshold ?? DEFAULT_CONFIG.associationRetrievalThreshold,
+    associationDecayConstantDays: config.associationDecayConstantDays ?? DEFAULT_CONFIG.associationDecayConstantDays,
+    consolidationRetentionThreshold: config.consolidationRetentionThreshold ?? DEFAULT_CONFIG.consolidationRetentionThreshold,
+    consolidationGroupSize: config.consolidationGroupSize ?? DEFAULT_CONFIG.consolidationGroupSize,
+    consolidationSimilarityThreshold: config.consolidationSimilarityThreshold ?? DEFAULT_CONFIG.consolidationSimilarityThreshold,
+    coldMigrationDays: config.coldMigrationDays ?? DEFAULT_CONFIG.coldMigrationDays,
+    coldStorageTtlDays: config.coldStorageTtlDays ?? DEFAULT_CONFIG.coldStorageTtlDays,
+    deepRecallPenalty: config.deepRecallPenalty ?? DEFAULT_CONFIG.deepRecallPenalty,
+    runMaintenanceDuringIngestion: config.runMaintenanceDuringIngestion ?? DEFAULT_CONFIG.runMaintenanceDuringIngestion,
+    extractionModel: config.extractionModel ?? DEFAULT_CONFIG.extractionModel,
+    embeddingModel: config.embeddingModel ?? DEFAULT_CONFIG.embeddingModel,
+    embeddingDimensions: config.embeddingDimensions ?? DEFAULT_CONFIG.embeddingDimensions,
+    customExtractionInstructions: config.customExtractionInstructions ?? DEFAULT_CONFIG.customExtractionInstructions,
+    extractionMode: config.extractionMode ?? DEFAULT_CONFIG.extractionMode,
   };
 }
 
@@ -202,8 +535,63 @@ export interface CognitiveMemoryConfig {
  * Embedding provider interface
  */
 export interface EmbeddingProvider {
-  /**
-   * Generate embedding vector for text
-   */
+  /** Generate embedding vector for text */
   embed(text: string): Promise<number[]>;
+
+  /** Generate embeddings for multiple texts */
+  embedBatch?(texts: string[]): Promise<number[][]>;
+
+  /** Embedding dimensions */
+  readonly dimensions?: number;
+}
+
+/**
+ * Create a default Memory object with all fields initialized
+ */
+export function createDefaultMemory(
+  partial: Partial<Memory> & { id: string; userId: string; content: string; embedding: number[] },
+): Memory {
+  const now = Date.now();
+  const category = partial.category ?? "semantic";
+  return {
+    category,
+    memoryType: category === "core" ? "semantic" : (category as MemoryType),
+    importance: 0.5,
+    stability: 0.3,
+    accessCount: 0,
+    lastAccessed: now,
+    retention: 1.0,
+    createdAt: now,
+    updatedAt: now,
+    associations: {},
+    sessionIds: [],
+    isCold: false,
+    coldSince: null,
+    daysAtFloor: 0,
+    isSuperseded: false,
+    supersededBy: null,
+    isStub: false,
+    contradictedBy: null,
+    ...partial,
+  };
+}
+
+/**
+ * Get the retention floor for a memory category
+ */
+export function getRetentionFloor(
+  category: MemoryCategory,
+  config: { coreRetentionFloor: number; regularRetentionFloor: number },
+): number {
+  return category === "core" ? config.coreRetentionFloor : config.regularRetentionFloor;
+}
+
+/**
+ * Get the base decay rate for a memory category
+ */
+export function getBaseDecayRate(
+  category: MemoryCategory,
+  rates: Record<MemoryCategory, number>,
+): number {
+  return rates[category];
 }

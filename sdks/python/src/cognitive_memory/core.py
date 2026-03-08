@@ -138,40 +138,56 @@ class CognitiveMemory:
         run_tick: bool = True,
     ) -> list[Memory]:
         """
-        Extract memories from conversation text using LLM, embed them,
-        check for conflicts, and store.
+        Extract memories from conversation text, embed them, and store.
+
+        Behavior depends on ``config.extraction_mode``:
+        - ``"semantic"`` (default): LLM extracts structured facts.
+        - ``"raw"``: each conversation turn stored verbatim (no LLM).
+        - ``"hybrid"``: both semantic extraction AND raw turns stored.
         """
+        mode = self.config.extraction_mode
+        if mode not in ("raw", "semantic", "hybrid"):
+            raise ValueError(f"Invalid extraction_mode: {mode!r}. Must be 'raw', 'semantic', or 'hybrid'.")
+
         now = timestamp or datetime.now()
+        stored: list[Memory] = []
 
-        # Extract via LLM
-        memories = self._extractor.extract_from_conversation(
-            conversation_text, session_id, now,
-        )
+        # --- Semantic extraction (modes: semantic, hybrid) ---
+        if mode in ("semantic", "hybrid"):
+            memories = self._extractor.extract_from_conversation(
+                conversation_text, session_id, now,
+            )
+            if memories:
+                contents = [m.content for m in memories]
+                embeddings = self._embedder.embed_batch(contents)
+                for mem, emb in zip(memories, embeddings):
+                    mem.embedding = emb
 
-        if not memories:
+                for mem in memories:
+                    await self._check_conflicts(mem, now)
+                    if mem.embedding is not None:
+                        similar = await self._adapter.search_similar(mem.embedding, top_k=3)
+                        for existing_mem, sim in similar:
+                            if sim > 0.75 and existing_mem.id != mem.id:
+                                existing_mem.stability = min(1.0, existing_mem.stability + 0.05)
+                    await self._adapter.create(mem)
+                    stored.append(mem)
+
+        # --- Raw turn storage (modes: raw, hybrid) ---
+        if mode in ("raw", "hybrid"):
+            raw_memories = self._extractor.extract_raw_turns(
+                conversation_text, session_id, now,
+            )
+            if raw_memories:
+                raw_contents = [m.content for m in raw_memories]
+                raw_embeddings = self._embedder.embed_batch(raw_contents)
+                for mem, emb in zip(raw_memories, raw_embeddings):
+                    mem.embedding = emb
+                    await self._adapter.create(mem)
+                    stored.append(mem)
+
+        if not stored:
             return []
-
-        # Batch embed
-        contents = [m.content for m in memories]
-        embeddings = self._embedder.embed_batch(contents)
-        for mem, emb in zip(memories, embeddings):
-            mem.embedding = emb
-
-        # Check conflicts, boost similar existing memories, and store
-        stored = []
-        for mem in memories:
-            await self._check_conflicts(mem, now)
-
-            # Ingestion-time similarity boost: if this topic was mentioned
-            # before, boost existing memory's stability (repeated exposure)
-            if mem.embedding is not None:
-                similar = await self._adapter.search_similar(mem.embedding, top_k=3)
-                for existing_mem, sim in similar:
-                    if sim > 0.75 and existing_mem.id != mem.id:
-                        existing_mem.stability = min(1.0, existing_mem.stability + 0.05)
-
-            await self._adapter.create(mem)
-            stored.append(mem)
 
         # Synaptic tagging: create associations between memories from the
         # same session. In neuroscience, memories encoded close together in
@@ -190,7 +206,6 @@ class CognitiveMemory:
                     continue
                 sim = _cos_sim(stored[i].embedding, stored[j].embedding)
                 if sim >= ingestion_assoc_threshold:
-                    # Create bidirectional association
                     weight = min(0.5, ingestion_assoc_weight + (sim - ingestion_assoc_threshold) * 0.5)
                     if stored[j].id not in stored[i].associations:
                         stored[i].associations[stored[j].id] = _Assoc(

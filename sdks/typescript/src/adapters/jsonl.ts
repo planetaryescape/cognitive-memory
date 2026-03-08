@@ -1,7 +1,7 @@
 /**
  * JSONL File Adapter for Cognitive Memory
  *
- * Append-only event log + in-memory index.
+ * Append-only event log + in-memory three-tier index.
  * Node-only (uses fs).
  */
 
@@ -19,6 +19,7 @@ import {
 import { basename, dirname } from "node:path";
 import * as readline from "node:readline";
 import type { Memory, ScoredMemory } from "../core/types";
+import { createDefaultMemory } from "../core/types";
 import { cosineSimilarity } from "../utils/embeddings";
 import { MemoryAdapter, type MemoryFilters } from "./base";
 
@@ -51,7 +52,7 @@ export type JsonlFileAdapterOptions = {
   path: string;
   fsync?: boolean;
   rollover?: { maxLines?: number; enabled?: boolean };
-  compact?: { maxLines?: number; onStart?: boolean }; // maxLines kept for backward-compat
+  compact?: { maxLines?: number; onStart?: boolean };
   now?: () => number;
   idFactory?: () => string;
 };
@@ -70,8 +71,10 @@ export class JsonlFileAdapter extends MemoryAdapter {
   private writeChain: Promise<void> = Promise.resolve();
 
   private lineCount = 0;
-  private memories = new Map<string, Memory>();
-  private links = new Map<string, LinkRow>(); // key a|b
+  private hot = new Map<string, Memory>();
+  private cold = new Map<string, Memory>();
+  private stubs = new Map<string, Memory>();
+  private links = new Map<string, LinkRow>();
 
   constructor(options: JsonlFileAdapterOptions) {
     super();
@@ -104,28 +107,44 @@ export class JsonlFileAdapter extends MemoryAdapter {
     await this.ready();
     const id = this.idFactory();
     const now = this.now();
-    const m: Memory = { ...memory, id, createdAt: now, updatedAt: now };
-    this.memories.set(id, m);
+    const m = createDefaultMemory({
+      ...memory,
+      id,
+      createdAt: now,
+      updatedAt: now,
+    });
+    this.hot.set(id, m);
     await this.append({ type: "memory", memory: m });
     return id;
   }
 
   async getMemory(id: string): Promise<Memory | null> {
     await this.ready();
-    return this.memories.get(id) ?? null;
+    return this.hot.get(id) ?? this.cold.get(id) ?? this.stubs.get(id) ?? null;
   }
 
   async getMemories(ids: string[]): Promise<Memory[]> {
     await this.ready();
-    return ids.map((id) => this.memories.get(id)).filter(Boolean) as Memory[];
+    return ids
+      .map((id) => this.hot.get(id) ?? this.cold.get(id) ?? this.stubs.get(id))
+      .filter(Boolean) as Memory[];
   }
 
   async queryMemories(filters: MemoryFilters): Promise<Memory[]> {
     await this.ready();
-    let items = Array.from(this.memories.values());
+    let items = [
+      ...Array.from(this.hot.values()),
+      ...Array.from(this.cold.values()),
+    ];
+
+    if (!filters.includeSuperseded)
+      items = items.filter((m) => !m.isSuperseded);
+    items = items.filter((m) => !m.isStub);
 
     if (filters.userId)
       items = items.filter((m) => m.userId === filters.userId);
+    if (filters.categories)
+      items = items.filter((m) => filters.categories!.includes(m.category));
     if (filters.memoryTypes)
       items = items.filter((m) => filters.memoryTypes!.includes(m.memoryType));
     if (filters.minRetention !== undefined)
@@ -143,16 +162,19 @@ export class JsonlFileAdapter extends MemoryAdapter {
 
   async updateMemory(id: string, updates: Partial<Memory>): Promise<void> {
     await this.ready();
-    const existing = this.memories.get(id);
-    if (!existing) return;
+    const tier = this.getTier(id);
+    if (!tier) return;
+    const existing = tier.get(id)!;
     const next = { ...existing, ...updates, id, createdAt: existing.createdAt };
-    this.memories.set(id, next);
+    tier.set(id, next);
     await this.append({ type: "memory", memory: next });
   }
 
   async deleteMemory(id: string): Promise<void> {
     await this.ready();
-    this.memories.delete(id);
+    this.hot.delete(id);
+    this.cold.delete(id);
+    this.stubs.delete(id);
     await this.append({ type: "memory_delete", id, at: this.now() });
   }
 
@@ -160,7 +182,9 @@ export class JsonlFileAdapter extends MemoryAdapter {
     await this.ready();
     await this.withWriteLock(async () => {
       for (const id of ids) {
-        this.memories.delete(id);
+        this.hot.delete(id);
+        this.cold.delete(id);
+        this.stubs.delete(id);
         await this.appendUnlocked({
           type: "memory_delete",
           id,
@@ -175,7 +199,24 @@ export class JsonlFileAdapter extends MemoryAdapter {
     filters?: MemoryFilters,
   ): Promise<ScoredMemory[]> {
     await this.ready();
-    const items = await this.queryMemories(filters ?? {});
+    let items = Array.from(this.hot.values());
+
+    if (filters?.includeSuperseded) {
+      items = [...items, ...Array.from(this.cold.values())];
+    }
+
+    if (filters?.userId)
+      items = items.filter((m) => m.userId === filters.userId);
+    if (filters?.categories)
+      items = items.filter((m) => filters.categories!.includes(m.category));
+    if (filters?.memoryTypes)
+      items = items.filter((m) => filters.memoryTypes!.includes(m.memoryType));
+    if (filters?.minRetention !== undefined)
+      items = items.filter((m) => m.retention >= filters.minRetention!);
+    if (!filters?.includeSuperseded)
+      items = items.filter((m) => !m.isSuperseded);
+    items = items.filter((m) => !m.isStub);
+
     return items
       .map((m) => {
         const relevanceScore = cosineSimilarity(embedding, m.embedding);
@@ -193,10 +234,11 @@ export class JsonlFileAdapter extends MemoryAdapter {
     await this.ready();
     await this.withWriteLock(async () => {
       for (const [id, retention] of updates.entries()) {
-        const m = this.memories.get(id);
-        if (!m) continue;
+        const tier = this.getTier(id);
+        if (!tier) continue;
+        const m = tier.get(id)!;
         const next = { ...m, retention };
-        this.memories.set(id, next);
+        tier.set(id, next);
         await this.appendUnlocked({ type: "memory", memory: next });
       }
     });
@@ -248,7 +290,7 @@ export class JsonlFileAdapter extends MemoryAdapter {
         const [a, b] = key.split("|");
         const other = a === id ? b : b === id ? a : null;
         if (!other) continue;
-        const m = this.memories.get(other);
+        const m = await this.getMemory(other);
         if (!m) continue;
         const prev = out.get(other);
         out.set(
@@ -274,8 +316,15 @@ export class JsonlFileAdapter extends MemoryAdapter {
     maxRetention: number,
   ): Promise<Memory[]> {
     await this.ready();
-    return Array.from(this.memories.values()).filter(
-      (m) => m.userId === userId && m.retention < maxRetention,
+    return [
+      ...Array.from(this.hot.values()),
+      ...Array.from(this.cold.values()),
+    ].filter(
+      (m) =>
+        m.userId === userId &&
+        m.retention < maxRetention &&
+        !m.isSuperseded &&
+        !m.isStub,
     );
   }
 
@@ -285,7 +334,7 @@ export class JsonlFileAdapter extends MemoryAdapter {
     minAccessCount: number,
   ): Promise<Memory[]> {
     await this.ready();
-    return Array.from(this.memories.values()).filter(
+    return Array.from(this.hot.values()).filter(
       (m) =>
         m.userId === userId &&
         m.stability >= minStability &&
@@ -297,16 +346,137 @@ export class JsonlFileAdapter extends MemoryAdapter {
     await this.ready();
     await this.withWriteLock(async () => {
       for (const id of memoryIds) {
-        const m = this.memories.get(id);
-        if (!m) continue;
+        const tier = this.getTier(id);
+        if (!tier) continue;
+        const m = tier.get(id)!;
         const next: Memory = {
           ...m,
+          isSuperseded: true,
+          supersededBy: summaryId,
           metadata: { ...(m.metadata ?? {}), supersededBy: summaryId },
         };
-        this.memories.set(id, next);
+        tier.set(id, next);
         await this.appendUnlocked({ type: "memory", memory: next });
       }
     });
+  }
+
+  // ------------------------------------------------------------------
+  // Tiered storage
+  // ------------------------------------------------------------------
+
+  async migrateToCold(memoryId: string, coldSince: number): Promise<void> {
+    await this.ready();
+    const m = this.hot.get(memoryId);
+    if (!m) return;
+    this.hot.delete(memoryId);
+    const coldMem = { ...m, isCold: true, coldSince };
+    this.cold.set(memoryId, coldMem);
+    await this.append({ type: "memory", memory: coldMem });
+  }
+
+  async migrateToHot(memoryId: string): Promise<void> {
+    await this.ready();
+    const m = this.cold.get(memoryId);
+    if (!m) return;
+    this.cold.delete(memoryId);
+    const hotMem = { ...m, isCold: false, coldSince: null, daysAtFloor: 0 };
+    this.hot.set(memoryId, hotMem);
+    await this.append({ type: "memory", memory: hotMem });
+  }
+
+  async convertToStub(memoryId: string, stubContent: string): Promise<void> {
+    await this.ready();
+    const m = this.cold.get(memoryId) ?? this.hot.get(memoryId);
+    if (!m) return;
+    this.hot.delete(memoryId);
+    this.cold.delete(memoryId);
+    const stubMem: Memory = {
+      ...m,
+      content: stubContent,
+      isStub: true,
+      isCold: false,
+      coldSince: null,
+      embedding: [],
+    };
+    this.stubs.set(memoryId, stubMem);
+    await this.append({ type: "memory", memory: stubMem });
+  }
+
+  // ------------------------------------------------------------------
+  // Traversal
+  // ------------------------------------------------------------------
+
+  async allActive(): Promise<Memory[]> {
+    await this.ready();
+    return [
+      ...Array.from(this.hot.values()),
+      ...Array.from(this.cold.values()),
+    ];
+  }
+
+  async allHot(): Promise<Memory[]> {
+    await this.ready();
+    return Array.from(this.hot.values());
+  }
+
+  async allCold(): Promise<Memory[]> {
+    await this.ready();
+    return Array.from(this.cold.values());
+  }
+
+  // ------------------------------------------------------------------
+  // Counts
+  // ------------------------------------------------------------------
+
+  async hotCount(): Promise<number> {
+    await this.ready();
+    return this.hot.size;
+  }
+
+  async coldCount(): Promise<number> {
+    await this.ready();
+    return this.cold.size;
+  }
+
+  async stubCount(): Promise<number> {
+    await this.ready();
+    return this.stubs.size;
+  }
+
+  async totalCount(): Promise<number> {
+    await this.ready();
+    return this.hot.size + this.cold.size + this.stubs.size;
+  }
+
+  // ------------------------------------------------------------------
+  // Reset
+  // ------------------------------------------------------------------
+
+  async clear(): Promise<void> {
+    await this.ready();
+    this.hot.clear();
+    this.cold.clear();
+    this.stubs.clear();
+    this.links.clear();
+    const meta: MemoryEvent = {
+      type: "meta",
+      version: 1,
+      createdAt: this.now(),
+    };
+    await writeFile(this.path, `${JSON.stringify(meta)}\n`, "utf8");
+    this.lineCount = 1;
+  }
+
+  // ------------------------------------------------------------------
+  // Private
+  // ------------------------------------------------------------------
+
+  private getTier(id: string): Map<string, Memory> | null {
+    if (this.hot.has(id)) return this.hot;
+    if (this.cold.has(id)) return this.cold;
+    if (this.stubs.has(id)) return this.stubs;
+    return null;
   }
 
   private async load(): Promise<void> {
@@ -352,11 +522,32 @@ export class JsonlFileAdapter extends MemoryAdapter {
   private apply(evt: MemoryEvent) {
     if (evt.type === "meta") return;
     if (evt.type === "memory") {
-      this.memories.set(evt.memory.id, evt.memory);
+      const m = createDefaultMemory({
+        ...evt.memory,
+        id: evt.memory.id,
+        userId: evt.memory.userId,
+        content: evt.memory.content,
+        embedding: evt.memory.embedding,
+      });
+      if (m.isStub) {
+        this.hot.delete(m.id);
+        this.cold.delete(m.id);
+        this.stubs.set(m.id, m);
+      } else if (m.isCold) {
+        this.hot.delete(m.id);
+        this.stubs.delete(m.id);
+        this.cold.set(m.id, m);
+      } else {
+        this.cold.delete(m.id);
+        this.stubs.delete(m.id);
+        this.hot.set(m.id, m);
+      }
       return;
     }
     if (evt.type === "memory_delete") {
-      this.memories.delete(evt.id);
+      this.hot.delete(evt.id);
+      this.cold.delete(evt.id);
+      this.stubs.delete(evt.id);
       return;
     }
     if (evt.type === "link") {
@@ -412,8 +603,6 @@ export class JsonlFileAdapter extends MemoryAdapter {
   }
 
   private async compact(): Promise<void> {
-    // Snapshot current state into a fresh base log, but keep the previous base log
-    // by rotating it. This preserves full history by default.
     const archive = await this.nextArchivePath();
     await rename(this.path, archive);
 
@@ -424,10 +613,12 @@ export class JsonlFileAdapter extends MemoryAdapter {
       createdAt: this.now(),
     };
     const lines: string[] = [JSON.stringify(meta)];
-    for (const m of this.memories.values()) {
-      lines.push(
-        JSON.stringify({ type: "memory", memory: m } satisfies MemoryEvent),
-      );
+    for (const store of [this.hot, this.cold, this.stubs]) {
+      for (const m of store.values()) {
+        lines.push(
+          JSON.stringify({ type: "memory", memory: m } satisfies MemoryEvent),
+        );
+      }
     }
     for (const [key, row] of this.links.entries()) {
       const [a, b] = key.split("|");

@@ -6,7 +6,8 @@
 
 import type { ConvexClient } from "convex/browser";
 import type { FunctionReference } from "convex/server";
-import type { Memory, MemoryType, ScoredMemory } from "../core/types";
+import type { Memory, MemoryCategory, ScoredMemory } from "../core/types";
+import { createDefaultMemory } from "../core/types";
 import { MemoryAdapter, type MemoryFilters } from "./base";
 
 type PublicQueryRef<A extends Record<string, unknown>, R> = FunctionReference<
@@ -50,8 +51,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isMemoryType(value: unknown): value is MemoryType {
-  return value === "episodic" || value === "semantic" || value === "procedural";
+const VALID_CATEGORIES = new Set(["episodic", "semantic", "procedural", "core"]);
+function isMemoryCategory(value: unknown): value is MemoryCategory {
+  return typeof value === "string" && VALID_CATEGORIES.has(value);
 }
 
 export class ConvexAdapter extends MemoryAdapter {
@@ -90,6 +92,7 @@ export class ConvexAdapter extends MemoryAdapter {
       content: memory.content,
       embedding: memory.embedding,
       memoryType: memory.memoryType,
+      category: memory.category,
       stability: memory.stability,
       accessCount: memory.accessCount,
       lastAccessed: memory.lastAccessed,
@@ -143,6 +146,7 @@ export class ConvexAdapter extends MemoryAdapter {
     if (updates.embedding !== undefined) payload.embedding = updates.embedding;
     if (updates.memoryType !== undefined)
       payload.memoryType = updates.memoryType;
+    if (updates.category !== undefined) payload.category = updates.category;
     if (updates.stability !== undefined) payload.stability = updates.stability;
     if (updates.accessCount !== undefined)
       payload.accessCount = updates.accessCount;
@@ -171,8 +175,10 @@ export class ConvexAdapter extends MemoryAdapter {
       embedding,
       userId: filters?.userId,
       memoryTypes: filters?.memoryTypes,
+      categories: filters?.categories,
       minRetention: filters?.minRetention,
       limit: filters?.limit ?? 5,
+      includeSuperseded: filters?.includeSuperseded ?? false,
     });
 
     if (!Array.isArray(raw)) return [];
@@ -285,6 +291,89 @@ export class ConvexAdapter extends MemoryAdapter {
     });
   }
 
+  // ------------------------------------------------------------------
+  // Tiered storage (delegate to Convex backend)
+  // ------------------------------------------------------------------
+
+  async migrateToCold(memoryId: string, coldSince: number): Promise<void> {
+    await this.updateMemory(memoryId, {
+      isCold: true,
+      coldSince,
+    } as Partial<Memory>);
+  }
+
+  async migrateToHot(memoryId: string): Promise<void> {
+    await this.updateMemory(memoryId, {
+      isCold: false,
+      coldSince: null,
+      daysAtFloor: 0,
+    } as Partial<Memory>);
+  }
+
+  async convertToStub(memoryId: string, stubContent: string): Promise<void> {
+    await this.updateMemory(memoryId, {
+      content: stubContent,
+      isStub: true,
+      isCold: false,
+      coldSince: null,
+      embedding: [],
+    } as Partial<Memory>);
+  }
+
+  // ------------------------------------------------------------------
+  // Traversal (basic implementation via queryMemories)
+  // ------------------------------------------------------------------
+
+  async allActive(): Promise<Memory[]> {
+    const all = await this.queryMemories({});
+    return all.filter((m) => !m.isStub);
+  }
+
+  async allHot(): Promise<Memory[]> {
+    const all = await this.queryMemories({});
+    return all.filter((m) => !m.isCold && !m.isStub);
+  }
+
+  async allCold(): Promise<Memory[]> {
+    const all = await this.queryMemories({});
+    return all.filter((m) => m.isCold && !m.isStub);
+  }
+
+  // ------------------------------------------------------------------
+  // Counts
+  // ------------------------------------------------------------------
+
+  async hotCount(): Promise<number> {
+    return (await this.allHot()).length;
+  }
+
+  async coldCount(): Promise<number> {
+    return (await this.allCold()).length;
+  }
+
+  async stubCount(): Promise<number> {
+    const all = await this.queryMemories({ includeSuperseded: true });
+    return all.filter((m) => m.isStub).length;
+  }
+
+  async totalCount(): Promise<number> {
+    const all = await this.queryMemories({ includeSuperseded: true });
+    return all.length;
+  }
+
+  // ------------------------------------------------------------------
+  // Reset
+  // ------------------------------------------------------------------
+
+  async clear(): Promise<void> {
+    const all = await this.queryMemories({ includeSuperseded: true });
+    await this.deleteMemories(all.map((m) => m.id));
+  }
+
+  // ------------------------------------------------------------------
+  // Private helpers
+  // ------------------------------------------------------------------
+
   private linkedResultToMemories(
     raw: unknown,
   ): Array<Memory & { linkStrength: number }> {
@@ -328,9 +417,7 @@ export class ConvexAdapter extends MemoryAdapter {
         ? metadata.importance
         : 5;
 
-    const memoryType = isMemoryType(raw.memoryType)
-      ? raw.memoryType
-      : "semantic";
+    const category = isMemoryCategory(raw.category) ? raw.category : "semantic";
     const stability = typeof raw.stability === "number" ? raw.stability : 0.3;
     const accessCount =
       typeof raw.accessCount === "number" ? raw.accessCount : 0;
@@ -338,7 +425,7 @@ export class ConvexAdapter extends MemoryAdapter {
       typeof raw.lastAccessed === "number" ? raw.lastAccessed : createdAt;
     const retention = typeof raw.retention === "number" ? raw.retention : 1.0;
 
-    return {
+    return createDefaultMemory({
       id,
       userId,
       content,
@@ -346,7 +433,7 @@ export class ConvexAdapter extends MemoryAdapter {
         if (typeof n === "number") acc.push(n);
         return acc;
       }, []),
-      memoryType,
+      category,
       importance: importance10 / 10,
       stability,
       accessCount,
@@ -355,6 +442,11 @@ export class ConvexAdapter extends MemoryAdapter {
       createdAt,
       updatedAt,
       metadata: metadata ?? undefined,
-    };
+      isCold: typeof raw.isCold === "boolean" ? raw.isCold : false,
+      coldSince: typeof raw.coldSince === "number" ? raw.coldSince : null,
+      isSuperseded: typeof raw.isSuperseded === "boolean" ? raw.isSuperseded : false,
+      supersededBy: typeof raw.supersededBy === "string" ? raw.supersededBy : null,
+      isStub: typeof raw.isStub === "boolean" ? raw.isStub : false,
+    });
   }
 }

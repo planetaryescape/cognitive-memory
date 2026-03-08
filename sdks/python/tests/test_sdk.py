@@ -245,6 +245,120 @@ def test_scoring_prefers_recent():
     print(f"  scoring_prefers_recent: PASS")
 
 
+def test_extraction_mode_raw():
+    """Test raw extraction mode stores turns verbatim without LLM."""
+    config = CognitiveMemoryConfig(extraction_mode="raw")
+    mem = SyncCognitiveMemory(config=config, embedder="hash")
+
+    conversation = (
+        "[This conversation took place on 2024-03-15]\n"
+        "Ross: Hey Rach. I got you a present. It is a Slinky!\n"
+        "Rachel: A Slinky? That is so thoughtful.\n"
+        "Joey: Who wants pizza?"
+    )
+
+    stored = mem.extract_and_store(conversation, session_id="s1")
+
+    # Should store 3 raw turns (header line skipped)
+    assert len(stored) == 3, f"Expected 3 raw turns, got {len(stored)}"
+    assert "Slinky" in stored[0].content, f"Expected verbatim turn, got: {stored[0].content}"
+    assert stored[0].category == MemoryCategory.EPISODIC
+
+    # Verify searchable (hash embeddings are not semantically meaningful,
+    # so just verify results are returned and contain stored content)
+    results = mem.search("Slinky present", top_k=3)
+    assert len(results) > 0, "Raw turns should be searchable"
+    all_contents = {r.memory.content for r in results}
+    assert any("Slinky" in c for c in all_contents) or len(results) == 3, \
+        "Expected raw turns to be in search results"
+
+    stats = mem.get_stats()
+    assert stats["total_memories"] == 3
+    print(f"  extraction_mode_raw: PASS (stored {len(stored)} raw turns)")
+
+
+def test_extraction_mode_hybrid():
+    """Test hybrid mode stores both raw turns and extracted facts."""
+    config = CognitiveMemoryConfig(extraction_mode="hybrid")
+    mem = SyncCognitiveMemory(config=config, embedder="hash")
+
+    conversation = (
+        "Ross: My name is Ross and I am a paleontologist.\n"
+        "Rachel: Nice to meet you Ross!"
+    )
+
+    stored = mem.extract_and_store(conversation, session_id="s1")
+
+    # Hybrid should store more than just 2 raw turns (also extracted facts)
+    raw_count = sum(1 for m in stored if m.stability == 0.2)  # raw turns have stability=0.2
+    extracted_count = len(stored) - raw_count
+
+    assert raw_count == 2, f"Expected 2 raw turns, got {raw_count}"
+    assert extracted_count > 0, f"Expected extracted facts, got {extracted_count}"
+    assert len(stored) > 2, f"Hybrid should store more than raw-only, got {len(stored)}"
+
+    print(f"  extraction_mode_hybrid: PASS ({raw_count} raw + {extracted_count} extracted = {len(stored)} total)")
+
+
+def test_extraction_mode_semantic_default():
+    """Test that default mode is semantic (backward compat)."""
+    config = CognitiveMemoryConfig()
+    assert config.extraction_mode == "semantic"
+
+    mem = SyncCognitiveMemory(config=config, embedder="hash")
+    conversation = "User: My name is Alice.\nAssistant: Hello Alice!"
+
+    stored = mem.extract_and_store(conversation, session_id="s1")
+
+    # Semantic mode: should have extracted facts, NOT raw turns
+    # Raw turns have stability=0.2; extracted have stability based on importance
+    raw_count = sum(1 for m in stored if m.stability == 0.2)
+    assert raw_count == 0, f"Semantic mode should not store raw turns, got {raw_count}"
+    assert len(stored) > 0, "Should have extracted at least one fact"
+
+    print(f"  extraction_mode_semantic_default: PASS ({len(stored)} extracted)")
+
+
+def test_extraction_mode_raw_search():
+    """Test that raw turns are retrievable by specific keywords."""
+    config = CognitiveMemoryConfig(extraction_mode="raw")
+    mem = SyncCognitiveMemory(config=config, embedder="hash")
+
+    conversation = (
+        "Monica: I made spaghetti with meatballs for dinner.\n"
+        "Joey: I had three tickets to the Penguins hockey game!\n"
+        "Ross: Carol and I had nectarines on our first date.\n"
+        "Chandler: Could this pizza BE any bigger?"
+    )
+
+    mem.extract_and_store(conversation, session_id="s1")
+
+    # Each specific detail should be retrievable
+    results = mem.search("hockey game tickets", top_k=1)
+    assert len(results) > 0
+    assert "Penguins" in results[0].memory.content or "hockey" in results[0].memory.content
+
+    results = mem.search("what did Monica cook", top_k=1)
+    assert len(results) > 0
+    assert "spaghetti" in results[0].memory.content or "Monica" in results[0].memory.content
+
+    print(f"  extraction_mode_raw_search: PASS")
+
+
+def test_extraction_mode_invalid():
+    """Test that invalid extraction mode raises an error."""
+    config = CognitiveMemoryConfig(extraction_mode="invalid")
+    mem = SyncCognitiveMemory(config=config, embedder="hash")
+
+    try:
+        mem.extract_and_store("User: hello", session_id="s1")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "invalid" in str(e).lower()
+
+    print(f"  extraction_mode_invalid: PASS")
+
+
 if __name__ == "__main__":
     print("Running cognitive-memory SDK tests...\n")
 
@@ -258,6 +372,11 @@ if __name__ == "__main__":
         test_cold_storage_migration,
         test_cold_ttl_expiry,
         test_scoring_prefers_recent,
+        test_extraction_mode_raw,
+        test_extraction_mode_hybrid,
+        test_extraction_mode_semantic_default,
+        test_extraction_mode_raw_search,
+        test_extraction_mode_invalid,
     ]
 
     passed = 0

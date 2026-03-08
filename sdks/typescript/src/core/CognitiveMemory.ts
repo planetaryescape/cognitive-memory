@@ -2,45 +2,34 @@
  * Cognitive Memory System - Main Class
  *
  * High-level API for cognitive memory with decay, retrieval strengthening,
- * and associative linking.
+ * associative linking, tiered storage, and LLM extraction.
  */
 
 import type { MemoryAdapter, MemoryFilters } from "../adapters/base";
 import { cosineSimilarity } from "../utils/embeddings";
 import { extractTopics } from "../utils/scoring";
 import { updateStability } from "./decay";
+import { CognitiveEngine } from "./engine";
+import {
+  extractFromConversation,
+  extractRawTurns,
+  detectConflict,
+  compressMemories,
+  type LLMProvider,
+} from "./extraction";
 import type {
   CognitiveMemoryConfig,
   ConsolidationResult,
   EmbeddingProvider,
   Memory,
   MemoryInput,
-  MemoryType,
+  MemoryStats,
+  ResolvedCognitiveMemoryConfig,
   RetrievalQuery,
   ScoredMemory,
+  SearchResult,
 } from "./types";
-
-/**
- * Default configuration values
- */
-type ResolvedConfig = {
-  userId: string;
-  defaultImportance: number;
-  defaultStability: number;
-  minRetention: number;
-  decayRates: Record<MemoryType, number>;
-};
-
-const DEFAULT_CONFIG: Omit<ResolvedConfig, "userId"> = {
-  defaultImportance: 0.5,
-  defaultStability: 0.3,
-  minRetention: 0.2,
-  decayRates: {
-    episodic: 30,
-    semantic: 90,
-    procedural: Number.POSITIVE_INFINITY,
-  },
-};
+import { resolveConfig, getRetentionFloor } from "./types";
 
 function assertNonEmptyString(field: string, value: string) {
   if (value.trim().length === 0) {
@@ -70,13 +59,14 @@ async function sleep(ms: number) {
  * Main cognitive memory system
  *
  * Provides high-level API for storing, retrieving, and managing memories
- * with human-like characteristics: decay, retrieval strengthening, and
- * associative linking.
+ * with human-like characteristics: decay, retrieval strengthening,
+ * associative linking, tiered storage, and LLM extraction.
  */
 export class CognitiveMemory {
   private adapter: MemoryAdapter;
   private embeddingProvider: EmbeddingProvider;
-  private config: ResolvedConfig;
+  private config: ResolvedCognitiveMemoryConfig;
+  private engine: CognitiveEngine;
 
   constructor(options: {
     adapter: MemoryAdapter;
@@ -88,27 +78,17 @@ export class CognitiveMemory {
 
     this.adapter = options.adapter;
     this.embeddingProvider = options.embeddingProvider;
-    this.config = {
+    this.config = resolveConfig({
       userId: options.userId,
-      defaultImportance:
-        options.config?.defaultImportance ?? DEFAULT_CONFIG.defaultImportance,
-      defaultStability:
-        options.config?.defaultStability ?? DEFAULT_CONFIG.defaultStability,
-      minRetention: options.config?.minRetention ?? DEFAULT_CONFIG.minRetention,
-      decayRates: {
-        ...DEFAULT_CONFIG.decayRates,
-        ...options.config?.decayRates,
-      },
-    };
+      ...options.config,
+    });
+    this.engine = new CognitiveEngine(this.adapter, this.config);
   }
 
   /**
    * Store a new memory
    *
    * Generates embedding and initializes cognitive metadata.
-   *
-   * @param input Memory content and metadata
-   * @returns Created memory ID
    */
   async store(input: MemoryInput): Promise<string> {
     assertNonEmptyString("content", input.content);
@@ -118,40 +98,182 @@ export class CognitiveMemory {
       assertUnitInterval("stability", input.stability);
 
     const embedding = await this.embedWithRetry(input.content);
+    const category = input.category ?? input.memoryType ?? "semantic";
 
-    // Prepare memory data
     const now = Date.now();
     const memory: Omit<Memory, "id" | "createdAt" | "updatedAt"> = {
       userId: this.config.userId,
       content: input.content,
       embedding,
-      memoryType: input.memoryType || "semantic",
+      category,
+      memoryType: category === "core" ? "semantic" : (category as any),
       importance: input.importance ?? this.config.defaultImportance,
       stability: input.stability ?? this.config.defaultStability,
       accessCount: 0,
       lastAccessed: now,
-      retention: 1.0, // Fresh memory
+      retention: 1.0,
       metadata: input.metadata,
+      associations: {},
+      sessionIds: [],
+      isCold: false,
+      coldSince: null,
+      daysAtFloor: 0,
+      isSuperseded: false,
+      supersededBy: null,
+      isStub: false,
+      contradictedBy: null,
     };
 
-    // Store via adapter
     return this.adapter.createMemory(memory);
   }
 
   /**
-   * Retrieve memories relevant to a query
+   * Extract memories from conversation text using LLM, check conflicts, and store.
+   *
+   * This is the main ingestion method matching Python's extract_and_store.
+   */
+  async extractAndStore(
+    conversationText: string,
+    sessionId: string,
+    llm: LLMProvider,
+  ): Promise<string[]> {
+    assertNonEmptyString("conversationText", conversationText);
+    assertNonEmptyString("sessionId", sessionId);
+
+    const mode = this.config.extractionMode;
+    if (!["raw", "semantic", "hybrid"].includes(mode)) {
+      throw new Error(`Invalid extractionMode: "${mode}". Must be "raw", "semantic", or "hybrid".`);
+    }
+
+    const storedIds: string[] = [];
+
+    // --- Semantic extraction (modes: semantic, hybrid) ---
+    if (mode === "semantic" || mode === "hybrid") {
+      const extracted = await extractFromConversation(
+        conversationText,
+        llm,
+        this.config,
+        sessionId,
+      );
+
+      for (const mem of extracted) {
+        const embedding = await this.embedWithRetry(mem.content);
+
+        const existing = await this.adapter.vectorSearch(embedding, {
+          userId: this.config.userId,
+          limit: 5,
+        });
+
+        let shouldStore = true;
+        for (const existingMem of existing) {
+          if (existingMem.relevanceScore > 0.85) {
+            const conflict = await detectConflict(existingMem, mem, llm, this.config);
+            if (conflict === "CONTRADICTION" || conflict === "UPDATE") {
+              await this.adapter.updateMemory(existingMem.id, {
+                content: mem.content,
+                importance: Math.max(existingMem.importance, mem.importance),
+                lastAccessed: Date.now(),
+                contradictedBy: conflict === "CONTRADICTION" ? "new" : null,
+              });
+              storedIds.push(existingMem.id);
+              shouldStore = false;
+              break;
+            } else if (conflict === "OVERLAP") {
+              shouldStore = false;
+              break;
+            }
+          }
+        }
+
+        if (shouldStore) {
+          const id = await this.adapter.createMemory({
+            ...mem,
+            embedding,
+          });
+          storedIds.push(id);
+        }
+      }
+    }
+
+    // --- Raw turn storage (modes: raw, hybrid) ---
+    if (mode === "raw" || mode === "hybrid") {
+      const rawTurns = extractRawTurns(conversationText, this.config, sessionId);
+
+      for (const mem of rawTurns) {
+        const embedding = await this.embedWithRetry(mem.content);
+        const id = await this.adapter.createMemory({
+          ...mem,
+          embedding,
+        });
+        storedIds.push(id);
+      }
+    }
+
+    // Synaptic tagging — create associations between memories from same session
+    if (storedIds.length > 1) {
+      const storedMemories = await this.adapter.getMemories(storedIds);
+      for (let i = 0; i < storedMemories.length; i++) {
+        for (let j = i + 1; j < storedMemories.length; j++) {
+          if (
+            storedMemories[i].embedding.length > 0 &&
+            storedMemories[j].embedding.length > 0
+          ) {
+            const sim = cosineSimilarity(
+              storedMemories[i].embedding,
+              storedMemories[j].embedding,
+            );
+            if (sim > 0.4) {
+              await this.adapter.createOrStrengthenLink(
+                storedMemories[i].id,
+                storedMemories[j].id,
+                sim * 0.5,
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // Optionally run maintenance
+    if (this.config.runMaintenanceDuringIngestion) {
+      await this.tick();
+    }
+
+    return storedIds;
+  }
+
+  /**
+   * Search using the full 6-step retrieval pipeline from the engine.
+   *
+   * Returns SearchResult[] with detailed scoring information.
+   */
+  async search(query: RetrievalQuery): Promise<SearchResult[]> {
+    const {
+      query: queryText,
+      limit = 10,
+      sessionId,
+      deepRecall = false,
+    } = query;
+
+    assertNonEmptyString("query", queryText);
+
+    const queryEmbedding = await this.embedWithRetry(queryText);
+    const now = Date.now();
+
+    return this.engine.search(queryEmbedding, now, limit, sessionId, deepRecall);
+  }
+
+  /**
+   * Retrieve memories relevant to a query (backward-compatible simpler API)
    *
    * Combines semantic similarity with retention weighting.
-   * Optionally includes associatively linked memories.
-   *
-   * @param query Retrieval query
-   * @returns Array of scored memories, sorted by relevance × retention
    */
   async retrieve(query: RetrievalQuery): Promise<ScoredMemory[]> {
     const {
       query: queryText,
       limit = 5,
       minRetention = this.config.minRetention,
+      categories,
       memoryTypes,
       includeAssociations = true,
     } = query;
@@ -162,6 +284,7 @@ export class CognitiveMemory {
 
     const candidates = await this.adapter.vectorSearch(queryEmbedding, {
       userId: this.config.userId,
+      categories,
       memoryTypes,
       minRetention,
       limit: limit * 3,
@@ -169,13 +292,7 @@ export class CognitiveMemory {
 
     const scoredCandidates = candidates
       .map((m) => {
-        const retention = this.calculateRetentionFor({
-          stability: m.stability,
-          importance: m.importance,
-          accessCount: m.accessCount,
-          lastAccessed: m.lastAccessed,
-          memoryType: m.memoryType,
-        });
+        const retention = this.engine.computeRetention(m);
         const finalScore = m.relevanceScore * retention;
         return { ...m, retention, finalScore };
       })
@@ -197,14 +314,7 @@ export class CognitiveMemory {
           const cosine = cosineSimilarity(queryEmbedding, assoc.embedding);
           const relevanceScore = Math.max(cosine, assoc.linkStrength);
 
-          const retention = this.calculateRetentionFor({
-            stability: assoc.stability,
-            importance: assoc.importance,
-            accessCount: assoc.accessCount,
-            lastAccessed: assoc.lastAccessed,
-            memoryType: assoc.memoryType,
-          });
-
+          const retention = this.engine.computeRetention(assoc);
           if (retention < minRetention) continue;
 
           resultById.set(assoc.id, {
@@ -229,15 +339,11 @@ export class CognitiveMemory {
 
   /**
    * Get a memory by ID
-   *
-   * @param id Memory ID
-   * @returns Memory or null if not found
    */
   async get(id: string): Promise<Memory | null> {
     const memory = await this.adapter.getMemory(id);
 
     if (memory) {
-      // Strengthen on access
       await this.strengthenMemories([memory]);
     }
 
@@ -246,9 +352,6 @@ export class CognitiveMemory {
 
   /**
    * Query memories for this user
-   *
-   * Note: this strengthens returned memories (accessCount/lastAccessed/stability)
-   * so decay + reinforcement reflect actual usage.
    */
   async queryMemories(filters: MemoryFilters): Promise<Memory[]> {
     const memories = await this.adapter.queryMemories({
@@ -263,11 +366,6 @@ export class CognitiveMemory {
 
   /**
    * Update a memory's content
-   *
-   * Regenerates embedding and updates metadata.
-   *
-   * @param id Memory ID
-   * @param content New content
    */
   async update(id: string, content: string): Promise<void> {
     assertNonEmptyString("content", content);
@@ -279,7 +377,6 @@ export class CognitiveMemory {
 
     const embedding = await this.embedWithRetry(content);
 
-    // Update memory
     await this.adapter.updateMemory(id, {
       content,
       embedding,
@@ -289,11 +386,6 @@ export class CognitiveMemory {
 
   /**
    * Run consolidation process
-   *
-   * Identifies fading memories, compresses similar ones, and cleans up stale data.
-   * Should be run periodically (e.g., daily cron).
-   *
-   * @returns Consolidation results
    */
   async consolidate(): Promise<ConsolidationResult> {
     const result: ConsolidationResult = {
@@ -305,10 +397,10 @@ export class CognitiveMemory {
 
     await this.refreshRetentionScores();
 
-    // 1. Find fading memories (retention < 0.2)
+    // 1. Find fading memories
     const fading = await this.adapter.findFadingMemories(
       this.config.userId,
-      0.2,
+      this.config.consolidationRetentionThreshold,
     );
 
     result.decayed = fading.map((m) => ({
@@ -316,47 +408,75 @@ export class CognitiveMemory {
       retention: m.retention,
     }));
 
-    const groups = new Map<string, Memory[]>();
+    // 2. Group by category, cluster by similarity
+    const byCategory = new Map<string, Memory[]>();
     for (const memory of fading) {
-      const topic = extractTopics(memory.content, 1)[0] ?? "misc";
-      if (!groups.has(topic)) {
-        groups.set(topic, []);
-      }
-      groups.get(topic)!.push(memory);
+      const cat = memory.category ?? "semantic";
+      if (!byCategory.has(cat)) byCategory.set(cat, []);
+      byCategory.get(cat)!.push(memory);
     }
 
-    for (const [topic, memories] of groups) {
-      if (memories.length >= 5) {
-        const summary = this.summarizeMemories(memories);
+    for (const [category, memories] of byCategory) {
+      if (memories.length < this.config.consolidationGroupSize) continue;
+
+      // Greedy clustering by embedding similarity
+      const used = new Set<string>();
+      const groups: Memory[][] = [];
+
+      for (let i = 0; i < memories.length; i++) {
+        if (used.has(memories[i].id)) continue;
+        const group = [memories[i]];
+
+        for (let j = i + 1; j < memories.length; j++) {
+          if (used.has(memories[j].id)) continue;
+          if (memories[i].embedding.length > 0 && memories[j].embedding.length > 0) {
+            const sim = cosineSimilarity(memories[i].embedding, memories[j].embedding);
+            if (sim >= this.config.consolidationSimilarityThreshold) {
+              group.push(memories[j]);
+              if (group.length >= this.config.consolidationGroupSize) break;
+            }
+          }
+        }
+
+        if (group.length >= this.config.consolidationGroupSize) {
+          const finalGroup = group.slice(0, this.config.consolidationGroupSize);
+          groups.push(finalGroup);
+          for (const m of finalGroup) used.add(m.id);
+        }
+      }
+
+      for (const group of groups) {
+        const summary = this.summarizeMemories(group);
 
         const summaryId = await this.store({
           content: summary,
-          memoryType: "semantic",
-          importance: Math.max(...memories.map((m) => m.importance)),
+          category: category as any,
+          importance: Math.max(...group.map((m) => m.importance)),
           metadata: {
             compressed: true,
-            sourceCount: memories.length,
-            topic,
+            sourceCount: group.length,
+            category,
           },
         });
 
         await this.adapter.markSuperseded(
-          memories.map((m) => m.id),
+          group.map((m) => m.id),
           summaryId,
         );
 
         result.compressed.push({
           summaryId,
-          originalIds: memories.map((m) => m.id),
-          count: memories.length,
+          originalIds: group.map((m) => m.id),
+          count: group.length,
         });
       }
     }
 
+    // 3. Find promotion candidates
     const stable = await this.adapter.findStableMemories(
       this.config.userId,
-      0.9,
-      10,
+      this.config.coreStabilityThreshold,
+      this.config.coreAccessThreshold,
     );
 
     result.promotionCandidates = stable.map((m) => ({
@@ -365,6 +485,7 @@ export class CognitiveMemory {
       accessCount: m.accessCount,
     }));
 
+    // 4. Delete very faded memories
     const veryFaded = await this.adapter.queryMemories({
       userId: this.config.userId,
       minRetention: 0,
@@ -373,10 +494,7 @@ export class CognitiveMemory {
     const toDelete = veryFaded.filter((m) => {
       const daysSinceAccess =
         (Date.now() - m.lastAccessed) / (1000 * 60 * 60 * 24);
-      const supersededBy = (
-        m.metadata as { supersededBy?: unknown } | undefined
-      )?.supersededBy;
-      return m.retention < 0.05 && daysSinceAccess > 30 && !supersededBy;
+      return m.retention < 0.05 && daysSinceAccess > 30 && !m.isSuperseded;
     });
 
     if (toDelete.length > 0) {
@@ -388,25 +506,70 @@ export class CognitiveMemory {
   }
 
   /**
+   * Run all periodic maintenance: cold migration, TTL expiry, consolidation
+   */
+  async tick(llm?: LLMProvider): Promise<void> {
+    const now = Date.now();
+    const compressor = llm
+      ? (contents: string[]) => compressMemories(contents, llm, this.config)
+      : undefined;
+    await this.engine.tick(now, this.embeddingProvider, compressor);
+  }
+
+  /**
+   * Get memory system stats
+   */
+  async getStats(): Promise<MemoryStats> {
+    const [hotCount, coldCount, stubCount, totalCount] = await Promise.all([
+      this.adapter.hotCount(),
+      this.adapter.coldCount(),
+      this.adapter.stubCount(),
+      this.adapter.totalCount(),
+    ]);
+
+    const allActive = await this.adapter.allActive();
+    let coreCount = 0;
+    let faintCount = 0;
+    let totalRetention = 0;
+
+    for (const m of allActive) {
+      if (m.category === "core") coreCount++;
+      const retention = this.engine.computeRetention(m);
+      if (retention < this.config.faintThreshold) faintCount++;
+      totalRetention += retention;
+    }
+
+    return {
+      total: totalCount,
+      hot: hotCount,
+      cold: coldCount,
+      stub: stubCount,
+      core: coreCount,
+      faint: faintCount,
+      avgRetention: allActive.length > 0 ? totalRetention / allActive.length : 0,
+    };
+  }
+
+  /**
+   * Clear all memories for this user
+   */
+  async clear(): Promise<void> {
+    await this.adapter.clear();
+  }
+
+  /**
    * Recompute + persist retention for all memories for this user.
-   *
-   * Useful before consolidation and for periodic background refresh.
    */
   async refreshRetentionScores(): Promise<void> {
     const memories = await this.adapter.queryMemories({
       userId: this.config.userId,
       minRetention: 0,
+      includeSuperseded: true,
     });
 
     const updates = new Map<string, number>();
     for (const m of memories) {
-      const retention = this.calculateRetentionFor({
-        stability: m.stability,
-        importance: m.importance,
-        accessCount: m.accessCount,
-        lastAccessed: m.lastAccessed,
-        memoryType: m.memoryType,
-      });
+      const retention = this.engine.computeRetention(m);
       updates.set(m.id, retention);
     }
     if (updates.size > 0) await this.adapter.updateRetentionScores(updates);
@@ -414,10 +577,6 @@ export class CognitiveMemory {
 
   /**
    * Create a link between two memories
-   *
-   * @param sourceId Source memory ID
-   * @param targetId Target memory ID
-   * @param strength Link strength (0.0-1.0)
    */
   async link(
     sourceId: string,
@@ -428,11 +587,10 @@ export class CognitiveMemory {
     await this.adapter.createOrStrengthenLink(sourceId, targetId, strength);
   }
 
-  /**
-   * Strengthen memories after retrieval (spaced repetition)
-   *
-   * @private
-   */
+  // ------------------------------------------------------------------
+  // Private methods
+  // ------------------------------------------------------------------
+
   private async strengthenMemories(memories: Memory[]): Promise<void> {
     const now = Date.now();
 
@@ -451,14 +609,19 @@ export class CognitiveMemory {
       const daysSinceAccess =
         (now - memory.lastAccessed) / (1000 * 60 * 60 * 24);
 
-      const newStability = updateStability(memory.stability, daysSinceAccess);
+      const newStability = updateStability(
+        memory.stability,
+        daysSinceAccess,
+        this.config.directBoost,
+        this.config.maxSpacedRepMultiplier,
+        this.config.spacedRepIntervalDays,
+      );
 
-      const newRetention = this.calculateRetentionFor({
+      const newRetention = this.engine.computeRetention({
+        ...memory,
         stability: newStability,
-        importance: memory.importance,
         accessCount: memory.accessCount + 1,
         lastAccessed: now,
-        memoryType: memory.memoryType,
       });
 
       updates.push({
@@ -481,18 +644,13 @@ export class CognitiveMemory {
     });
   }
 
-  /**
-   * Strengthen links between co-retrieved memories
-   *
-   * @private
-   */
   private async strengthenLinks(memoryIds: string[]): Promise<void> {
     for (let i = 0; i < memoryIds.length; i++) {
       for (let j = i + 1; j < memoryIds.length; j++) {
         await this.adapter.createOrStrengthenLink(
           memoryIds[i],
           memoryIds[j],
-          0.1, // Increment strength by 0.1
+          0.1,
         );
       }
     }
@@ -517,43 +675,5 @@ export class CognitiveMemory {
       }
     }
     throw new Error(`Embedding failed: ${String(lastError)}`);
-  }
-
-  private calculateRetentionFor(params: {
-    stability: number;
-    importance: number;
-    accessCount: number;
-    lastAccessed: number;
-    memoryType: Memory["memoryType"];
-  }): number {
-    const { stability, importance, accessCount, lastAccessed, memoryType } =
-      params;
-
-    // Use config override if provided (defaults are present in merged config).
-    const baseDecay = this.config.decayRates[memoryType];
-    if (memoryType === "procedural" || baseDecay === Number.POSITIVE_INFINITY) {
-      return 1.0;
-    }
-
-    // Match decay.ts behavior for validation and edge cases.
-    assertUnitInterval("stability", stability);
-    assertUnitInterval("importance", importance);
-
-    const daysSinceAccess = Math.max(
-      0,
-      (Date.now() - lastAccessed) / (1000 * 60 * 60 * 24),
-    );
-    const importanceBoost = 1.0 + importance * 2.0;
-    const frequencyBoost = Math.min(
-      2.0,
-      1.0 + Math.log1p(Math.max(0, accessCount)) * 0.1,
-    );
-    const decayConstant =
-      stability * importanceBoost * frequencyBoost * baseDecay;
-    if (decayConstant < 0.1) {
-      return Math.max(0, 1.0 - daysSinceAccess / 10);
-    }
-    const retention = Math.exp(-daysSinceAccess / decayConstant);
-    return Math.max(0, Math.min(1, retention));
   }
 }

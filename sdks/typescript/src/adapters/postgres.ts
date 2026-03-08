@@ -6,10 +6,13 @@
 
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import type { Memory, MemoryType, ScoredMemory } from "../core/types";
+import type { Memory, MemoryCategory, ScoredMemory } from "../core/types";
+import { createDefaultMemory } from "../core/types";
 import { MemoryAdapter, type MemoryFilters } from "./base";
 
 type Db = Pick<PoolClient, "query">;
+
+const VALID_CATEGORIES = new Set(["episodic", "semantic", "procedural", "core"]);
 
 function qident(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
@@ -32,8 +35,8 @@ function parseVector(raw: unknown): number[] {
     .filter((n: number) => Number.isFinite(n));
 }
 
-function isMemoryType(value: unknown): value is MemoryType {
-  return value === "episodic" || value === "semantic" || value === "procedural";
+function isMemoryCategory(value: unknown): value is MemoryCategory {
+  return typeof value === "string" && VALID_CATEGORIES.has(value);
 }
 
 function canonicalPair(a: string, b: string): [string, string] {
@@ -80,6 +83,7 @@ export function postgresSchemaSql(options?: {
     `  user_id text NOT NULL,`,
     `  content text NOT NULL,`,
     `  embedding vector(${dimensions}) NOT NULL,`,
+    `  category text NOT NULL DEFAULT 'semantic' CHECK (category IN ('episodic','semantic','procedural','core')),`,
     `  memory_type text NOT NULL CHECK (memory_type IN ('episodic','semantic','procedural')),`,
     `  importance double precision NOT NULL,`,
     `  stability double precision NOT NULL,`,
@@ -87,12 +91,20 @@ export function postgresSchemaSql(options?: {
     `  last_accessed bigint NOT NULL,`,
     `  retention double precision NOT NULL,`,
     `  metadata jsonb,`,
+    `  is_cold boolean NOT NULL DEFAULT false,`,
+    `  cold_since bigint,`,
+    `  days_at_floor integer NOT NULL DEFAULT 0,`,
+    `  is_superseded boolean NOT NULL DEFAULT false,`,
+    `  superseded_by text,`,
+    `  is_stub boolean NOT NULL DEFAULT false,`,
+    `  contradicted_by text,`,
     `  created_at bigint NOT NULL,`,
     `  updated_at bigint NOT NULL`,
     `);`,
     `CREATE INDEX IF NOT EXISTS cognitive_memories_by_user_created ON ${mem} (user_id, created_at);`,
     `CREATE INDEX IF NOT EXISTS cognitive_memories_by_user_retention ON ${mem} (user_id, retention);`,
     `CREATE INDEX IF NOT EXISTS cognitive_memories_by_user_stability ON ${mem} (user_id, stability);`,
+    `CREATE INDEX IF NOT EXISTS cognitive_memories_by_tier ON ${mem} (is_cold, is_stub);`,
     `CREATE INDEX IF NOT EXISTS cognitive_memories_embedding_idx ON ${mem} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);`,
     `CREATE TABLE IF NOT EXISTS ${lnk} (`,
     `  source_id text NOT NULL,`,
@@ -173,22 +185,30 @@ export class PostgresAdapter extends MemoryAdapter {
 
     await this.db.query(
       `INSERT INTO ${this.mem} (
-        id, user_id, content, embedding, memory_type, importance, stability, access_count, last_accessed, retention, metadata, created_at, updated_at
+        id, user_id, content, embedding, category, memory_type, importance, stability, access_count, last_accessed, retention, metadata, is_cold, cold_since, days_at_floor, is_superseded, superseded_by, is_stub, contradicted_by, created_at, updated_at
       ) VALUES (
-        $1, $2, $3, $4::vector, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13
+        $1, $2, $3, $4::vector, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21
       )`,
       [
         id,
         memory.userId,
         memory.content,
         vecLiteral(memory.embedding),
-        memory.memoryType,
+        memory.category ?? "semantic",
+        memory.memoryType ?? "semantic",
         memory.importance,
         memory.stability,
         memory.accessCount,
         memory.lastAccessed,
         memory.retention,
         memory.metadata ? JSON.stringify(memory.metadata) : null,
+        memory.isCold ?? false,
+        memory.coldSince ?? null,
+        memory.daysAtFloor ?? 0,
+        memory.isSuperseded ?? false,
+        memory.supersededBy ?? null,
+        memory.isStub ?? false,
+        memory.contradictedBy ?? null,
         now,
         now,
       ],
@@ -259,6 +279,7 @@ export class PostgresAdapter extends MemoryAdapter {
     if (updates.content !== undefined) add("content", updates.content);
     if (updates.embedding !== undefined)
       add("embedding", vecLiteral(updates.embedding), "::vector");
+    if (updates.category !== undefined) add("category", updates.category);
     if (updates.memoryType !== undefined)
       add("memory_type", updates.memoryType);
     if (updates.importance !== undefined) add("importance", updates.importance);
@@ -270,6 +291,17 @@ export class PostgresAdapter extends MemoryAdapter {
     if (updates.retention !== undefined) add("retention", updates.retention);
     if (updates.metadata !== undefined)
       add("metadata", JSON.stringify(updates.metadata), "::jsonb");
+    if (updates.isCold !== undefined) add("is_cold", updates.isCold);
+    if (updates.coldSince !== undefined) add("cold_since", updates.coldSince);
+    if (updates.daysAtFloor !== undefined)
+      add("days_at_floor", updates.daysAtFloor);
+    if (updates.isSuperseded !== undefined)
+      add("is_superseded", updates.isSuperseded);
+    if (updates.supersededBy !== undefined)
+      add("superseded_by", updates.supersededBy);
+    if (updates.isStub !== undefined) add("is_stub", updates.isStub);
+    if (updates.contradictedBy !== undefined)
+      add("contradicted_by", updates.contradictedBy);
     if (updates.createdAt !== undefined) add("created_at", updates.createdAt);
     if (updates.updatedAt !== undefined) add("updated_at", updates.updatedAt);
 
@@ -427,7 +459,7 @@ export class PostgresAdapter extends MemoryAdapter {
     maxRetention: number,
   ): Promise<Memory[]> {
     const res = await this.db.query(
-      `SELECT * FROM ${this.mem} WHERE user_id = $1 AND retention < $2 ORDER BY retention ASC`,
+      `SELECT * FROM ${this.mem} WHERE user_id = $1 AND retention < $2 AND is_stub = false ORDER BY retention ASC`,
       [userId, maxRetention],
     );
     return res.rows
@@ -455,11 +487,111 @@ export class PostgresAdapter extends MemoryAdapter {
     if (memoryIds.length === 0) return;
     await this.db.query(
       `UPDATE ${this.mem}
-       SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('supersededBy', $2)
+       SET is_superseded = true, superseded_by = $2,
+           metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('supersededBy', $2)
        WHERE id = ANY($1::text[])`,
       [memoryIds, summaryId],
     );
   }
+
+  // ------------------------------------------------------------------
+  // Tiered storage
+  // ------------------------------------------------------------------
+
+  async migrateToCold(memoryId: string, coldSince: number): Promise<void> {
+    await this.db.query(
+      `UPDATE ${this.mem} SET is_cold = true, cold_since = $2 WHERE id = $1`,
+      [memoryId, coldSince],
+    );
+  }
+
+  async migrateToHot(memoryId: string): Promise<void> {
+    await this.db.query(
+      `UPDATE ${this.mem} SET is_cold = false, cold_since = NULL, days_at_floor = 0 WHERE id = $1`,
+      [memoryId],
+    );
+  }
+
+  async convertToStub(memoryId: string, stubContent: string): Promise<void> {
+    await this.db.query(
+      `UPDATE ${this.mem} SET content = $2, is_stub = true, is_cold = false, cold_since = NULL WHERE id = $1`,
+      [memoryId, stubContent],
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Traversal
+  // ------------------------------------------------------------------
+
+  async allActive(): Promise<Memory[]> {
+    const res = await this.db.query(
+      `SELECT * FROM ${this.mem} WHERE is_stub = false`,
+    );
+    return res.rows
+      .map((r: Record<string, unknown>) => this.rowToMemory(r))
+      .filter(Boolean) as Memory[];
+  }
+
+  async allHot(): Promise<Memory[]> {
+    const res = await this.db.query(
+      `SELECT * FROM ${this.mem} WHERE is_cold = false AND is_stub = false`,
+    );
+    return res.rows
+      .map((r: Record<string, unknown>) => this.rowToMemory(r))
+      .filter(Boolean) as Memory[];
+  }
+
+  async allCold(): Promise<Memory[]> {
+    const res = await this.db.query(
+      `SELECT * FROM ${this.mem} WHERE is_cold = true AND is_stub = false`,
+    );
+    return res.rows
+      .map((r: Record<string, unknown>) => this.rowToMemory(r))
+      .filter(Boolean) as Memory[];
+  }
+
+  // ------------------------------------------------------------------
+  // Counts
+  // ------------------------------------------------------------------
+
+  async hotCount(): Promise<number> {
+    const res = await this.db.query(
+      `SELECT COUNT(*) FROM ${this.mem} WHERE is_cold = false AND is_stub = false`,
+    );
+    return Number(res.rows[0].count);
+  }
+
+  async coldCount(): Promise<number> {
+    const res = await this.db.query(
+      `SELECT COUNT(*) FROM ${this.mem} WHERE is_cold = true AND is_stub = false`,
+    );
+    return Number(res.rows[0].count);
+  }
+
+  async stubCount(): Promise<number> {
+    const res = await this.db.query(
+      `SELECT COUNT(*) FROM ${this.mem} WHERE is_stub = true`,
+    );
+    return Number(res.rows[0].count);
+  }
+
+  async totalCount(): Promise<number> {
+    const res = await this.db.query(`SELECT COUNT(*) FROM ${this.mem}`);
+    return Number(res.rows[0].count);
+  }
+
+  // ------------------------------------------------------------------
+  // Reset
+  // ------------------------------------------------------------------
+
+  async clear(): Promise<void> {
+    await this.db.query(`DELETE FROM ${this.lnk}`);
+    await this.db.query(`DELETE FROM ${this.mem}`);
+  }
+
+  // ------------------------------------------------------------------
+  // Private helpers
+  // ------------------------------------------------------------------
 
   private buildWhere(
     filters: MemoryFilters,
@@ -476,6 +608,8 @@ export class PostgresAdapter extends MemoryAdapter {
     };
 
     if (filters.userId) add(`user_id =`, filters.userId);
+    if (filters.categories && filters.categories.length > 0)
+      add(`category = ANY(`, filters.categories, `::text[])`);
     if (filters.memoryTypes && filters.memoryTypes.length > 0)
       add(`memory_type = ANY(`, filters.memoryTypes, `::text[])`);
     if (filters.minRetention !== undefined)
@@ -486,6 +620,10 @@ export class PostgresAdapter extends MemoryAdapter {
       add(`created_at >=`, filters.createdAfter);
     if (filters.createdBefore !== undefined)
       add(`created_at <=`, filters.createdBefore);
+    if (!filters.includeSuperseded) {
+      clauses.push(`is_superseded = false`);
+    }
+    clauses.push(`is_stub = false`);
 
     return {
       sql: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "",
@@ -503,10 +641,7 @@ export class PostgresAdapter extends MemoryAdapter {
     if (!id || !userId || !content || createdAt === null || updatedAt === null)
       return null;
 
-    const memoryType = isMemoryType(row.memory_type)
-      ? row.memory_type
-      : "semantic";
-
+    const category = isMemoryCategory(row.category) ? row.category : "semantic";
     const embedding = parseVector(row.embedding);
     const importance = toNumber(row.importance) ?? 0.5;
     const stability = toNumber(row.stability) ?? 0.3;
@@ -519,12 +654,12 @@ export class PostgresAdapter extends MemoryAdapter {
         ? (row.metadata as Record<string, unknown>)
         : undefined;
 
-    return {
+    return createDefaultMemory({
       id,
       userId,
       content,
       embedding,
-      memoryType,
+      category,
       importance,
       stability,
       accessCount,
@@ -533,6 +668,13 @@ export class PostgresAdapter extends MemoryAdapter {
       createdAt,
       updatedAt,
       metadata,
-    };
+      isCold: row.is_cold === true,
+      coldSince: toNumber(row.cold_since),
+      daysAtFloor: toNumber(row.days_at_floor) ?? 0,
+      isSuperseded: row.is_superseded === true,
+      supersededBy: typeof row.superseded_by === "string" ? row.superseded_by : null,
+      isStub: row.is_stub === true,
+      contradictedBy: typeof row.contradicted_by === "string" ? row.contradicted_by : null,
+    });
   }
 }

@@ -52,3 +52,4 @@ docs/.astro/
 
 # Lockfiles (keep package-lock.json)
 !package-lock.json
+.vercel

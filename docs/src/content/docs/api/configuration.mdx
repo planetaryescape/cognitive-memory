@@ -91,14 +91,20 @@ The base decay rates and floors are defined as module-level constants:
 |-----------|------|:-------:|-------------|
 | `run_maintenance_during_ingestion` | `bool` | `True` | Run tick() every 5 ingestions |
 
+### Extraction
+
+| Parameter | Type | Default | Description |
+|-----------|------|:-------:|-------------|
+| `extraction_mode` | `str` | `"semantic"` | `"raw"` (verbatim turns), `"semantic"` (LLM facts), or `"hybrid"` (both) |
+| `extraction_model` | `str` | `"gpt-4o-mini"` | LLM for memory extraction |
+| `custom_extraction_instructions` | `str \| None` | `None` | Prepend to extraction prompt |
+
 ### Models
 
 | Parameter | Type | Default | Description |
 |-----------|------|:-------:|-------------|
-| `extraction_model` | `str` | `"gpt-4o-mini"` | LLM for memory extraction |
 | `embedding_model` | `str` | `"text-embedding-3-small"` | Embedding model |
 | `embedding_dimensions` | `int` | `1536` | Embedding vector dimensions |
-| `custom_extraction_instructions` | `str \| None` | `None` | Prepend to extraction prompt |
 
 ---
 
@@ -117,14 +123,32 @@ const mem = new CognitiveMemory({
 
 ### Available parameters
 
+The TypeScript SDK exposes the same parameters as Python, using camelCase naming. Key parameters:
+
 | Parameter | Type | Default | Description |
 |-----------|------|:-------:|-------------|
 | `defaultImportance` | `number` | `0.5` | Default importance for new memories |
 | `defaultStability` | `number` | `0.3` | Default stability for new memories |
 | `minRetention` | `number` | `0.2` | Minimum retention for retrieval results |
-| `decayRates.episodic` | `number` | `30` | Episodic decay rate (days) |
-| `decayRates.semantic` | `number` | `90` | Semantic decay rate (days) |
+| `faintThreshold` | `number` | `0.15` | Retention below which memories are "faint" |
+| `decayRates.episodic` | `number` | `45` | Episodic decay rate (days) |
+| `decayRates.semantic` | `number` | `120` | Semantic decay rate (days) |
 | `decayRates.procedural` | `number` | `Infinity` | Procedural decay rate (days) |
+| `decayRates.core` | `number` | `120` | Core decay rate (days) |
+| `retrievalScoreExponent` | `number` | `0.3` | Alpha in `score = sim * R^alpha` |
+| `directBoost` | `number` | `0.1` | Stability increase for direct retrieval |
+| `associativeBoost` | `number` | `0.03` | Stability increase for associative retrieval |
+| `coreAccessThreshold` | `number` | `10` | Min retrievals for core promotion |
+| `coreStabilityThreshold` | `number` | `0.85` | Min stability for core promotion |
+| `coreSessionThreshold` | `number` | `3` | Min distinct sessions for core promotion |
+| `consolidationRetentionThreshold` | `number` | `0.20` | Retention below which memories are consolidation candidates |
+| `consolidationGroupSize` | `number` | `5` | Min group size for consolidation |
+| `coldMigrationDays` | `number` | `7` | Days at floor before cold migration |
+| `coldStorageTtlDays` | `number` | `180` | Days in cold before stub conversion |
+| `deepRecallPenalty` | `number` | `0.5` | Score multiplier for superseded memories |
+| `extractionMode` | `string` | `"semantic"` | `"raw"`, `"semantic"`, or `"hybrid"` |
+| `extractionModel` | `string` | `"gpt-4o-mini"` | LLM for extraction |
+| `customExtractionInstructions` | `string \| null` | `null` | Prepend to extraction prompt |
 
 ---
 
@@ -169,11 +193,14 @@ config = CognitiveMemoryConfig(
     # Ingestion
     run_maintenance_during_ingestion=True,
 
-    # Models
+    # Extraction
+    extraction_mode="semantic",
     extraction_model="gpt-4o-mini",
+    custom_extraction_instructions=None,
+
+    # Models
     embedding_model="text-embedding-3-small",
     embedding_dimensions=1536,
-    custom_extraction_instructions=None,
 )
 ```
 

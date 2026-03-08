@@ -1,187 +1,295 @@
 ---
-title: Tuning Guide
-description: How to tune Cognitive Memory parameters for your specific workload.
+title: Configuration Guide
+description: Match Cognitive Memory settings to your use case. Covers extraction, retrieval, decay, consolidation, and every configurable parameter.
 ---
 
-## General approach
+Every parameter has a sensible default. You don't need to change anything to get started. This guide helps you tune settings when you have a specific use case or want to optimize performance.
 
-Tuning Cognitive Memory is an empirical process. The defaults are optimized for the LoCoMo benchmark (long multi-session conversations), but your workload may differ. The general approach:
+## Quick-start recipes
 
-1. Identify your bottleneck (retrieval precision, recall, decay behavior)
-2. Adjust the relevant parameter(s)
-3. Measure the effect on your test set
-4. Repeat
+Pick the recipe closest to your use case, then fine-tune individual parameters as needed.
 
-## The most impactful parameters
+### Personal assistant / chatbot
 
-In order of impact on retrieval quality:
-
-### 1. top_k (search parameter)
-
-This isn't a config parameter — it's passed to `search()`. But it's the single most impactful knob.
-
-| Value | Effect |
-|:-----:|--------|
-| 5-10 | Precise but may miss relevant memories |
-| 20-40 | Balanced. Good for most applications |
-| 60+ | Broad recall. Catches weak matches. Best with re-ranking |
-
-Our benchmark results jumped +14pp going from k=10 to k=60. If you're missing relevant memories, increase k first.
-
-### 2. retrieval_score_exponent (alpha)
-
-Controls how aggressively decay affects retrieval ranking.
-
-```python
-config = CognitiveMemoryConfig(retrieval_score_exponent=0.3)
-```
-
-| Value | Effect |
-|:-----:|--------|
-| 0.1 | Nearly ignores decay. Old memories rank as high as recent ones |
-| 0.3 | **Default.** Balanced |
-| 0.5 | Moderately favors recent memories |
-| 1.0 | Strong recency bias. Old memories are effectively suppressed |
-
-**Tune lower** if your application needs historical recall (medical history, legal records).
-**Tune higher** if your application deals with rapidly changing information (news, real-time data).
-
-### 3. deep_recall (search parameter)
-
-```python
-results = mem.search(query, deep_recall=True)
-```
-
-Enable deep recall when precision matters — specific dates, names, and numbers that might have been lost during consolidation. The 0.5 penalty prevents superseded memories from drowning out summaries.
-
-## Decay tuning
-
-### Base decay rates
-
-The base rates (45 days episodic, 120 days semantic) determine how quickly memories fade. These are module constants, not config parameters, but you can effectively adjust them by tuning stability.
-
-### Stability initialization
-
-New memories start with stability = `0.1 + (importance * 0.3)`. Importance is set by the LLM extractor (0.0-1.0).
-
-| Importance | Initial stability | Effect |
-|:----------:|:-----------------:|--------|
-| 0.0 | 0.10 | Fades very quickly |
-| 0.5 | 0.25 | Moderate |
-| 1.0 | 0.40 | Fades slowly |
-
-If memories are fading too fast, consider:
-- Increasing `direct_boost` to make retrieval strengthening more aggressive
-- Using the `custom_extraction_instructions` to bias the LLM toward higher importance scores
-
-### Spaced repetition tuning
+Long-running conversations across many sessions. Needs to remember user preferences, past events, and facts.
 
 ```python
 config = CognitiveMemoryConfig(
+    extraction_mode="semantic",
+    retrieval_score_exponent=0.3,
     direct_boost=0.1,
-    associative_boost=0.03,
-    max_spaced_rep_multiplier=2.0,
-    spaced_rep_interval_days=7.0,
-)
-```
-
-- **Higher `direct_boost`** (0.15-0.2): Memories stabilize faster with fewer retrievals
-- **Lower `spaced_rep_interval_days`** (3-5): Full boost kicks in sooner after access
-- **Higher `max_spaced_rep_multiplier`** (3.0): Larger boosts for long-idle memories
-
-## Association tuning
-
-### Synaptic tagging threshold
-
-Currently hardcoded at similarity >= 0.4 for ingestion-time association creation. If you're getting too many associations (noisy), this threshold would need to be raised in the source code. If too few associations (missing multi-hop paths), lower it.
-
-### Co-retrieval strengthening
-
-```python
-config = CognitiveMemoryConfig(
-    association_strengthen_amount=0.1,
-    association_retrieval_threshold=0.3,
-    association_decay_constant_days=90.0,
-)
-```
-
-- **Higher `association_strengthen_amount`** (0.15-0.2): Associations build faster
-- **Lower `association_retrieval_threshold`** (0.2): More associations activate during search (more multi-hop, but more noise)
-- **Higher `association_decay_constant_days`** (120-180): Associations persist longer without reinforcement
-
-## Core promotion tuning
-
-```python
-config = CognitiveMemoryConfig(
     core_access_threshold=10,
-    core_stability_threshold=0.85,
     core_session_threshold=3,
 )
+# Search with: top_k=20, deep_recall=False
 ```
 
-### Too few core promotions?
+This is the default configuration. Semantic extraction captures structured facts across sessions. Core promotion ensures frequently-referenced information (name, preferences) becomes permanent.
 
-- Lower `core_access_threshold` to 5-7
-- Lower `core_stability_threshold` to 0.7
-- Lower `core_session_threshold` to 2
+### Dialog system / roleplay / trivia
 
-### Too many core promotions?
-
-- Raise `core_access_threshold` to 15-20
-- Raise `core_session_threshold` to 5+
-
-Core memories are protected (0.60 floor, no cold migration). Promoting too aggressively can make the system "sticky" — old information never fades.
-
-## Consolidation tuning
+Exact recall of what was said matters more than structured reasoning. Users may ask "what did X say about Y?"
 
 ```python
 config = CognitiveMemoryConfig(
-    consolidation_retention_threshold=0.20,
-    consolidation_group_size=5,
-    consolidation_similarity_threshold=0.70,
+    extraction_mode="raw",
+    retrieval_score_exponent=0.1,  # don't penalize old turns
+    run_maintenance_during_ingestion=False,  # no consolidation
 )
+# Search with: top_k=50, deep_recall=False
 ```
 
-- **Lower `consolidation_retention_threshold`** (0.10): Only consolidate very faded memories. More originals stay in hot store.
-- **Higher `consolidation_retention_threshold`** (0.30): Consolidate earlier. Reduces hot-store noise faster.
-- **Smaller `consolidation_group_size`** (3): More frequent consolidation events.
-- **Lower `consolidation_similarity_threshold`** (0.50): Larger, more diverse groups.
+Raw mode stores every turn verbatim. Low alpha keeps old turns retrievable. Disable maintenance to prevent consolidation from merging turns.
 
-## Tiered storage tuning
+### Hybrid recall (best of both)
+
+Need structured facts AND exact quotes. Willing to pay the storage and LLM cost.
 
 ```python
 config = CognitiveMemoryConfig(
-    cold_migration_days=7,
-    cold_storage_ttl_days=180,
+    extraction_mode="hybrid",
+    retrieval_score_exponent=0.2,
+    direct_boost=0.1,
 )
+# Search with: top_k=30, deep_recall=True
 ```
 
-- **Shorter `cold_migration_days`** (3): Memories leave hot store faster. Reduces search noise but may lose multi-hop paths.
-- **Longer `cold_storage_ttl_days`** (365): Cold memories survive longer before becoming stubs. More data for deep recall.
+Hybrid stores both extracted facts and raw turns. Deep recall ensures superseded originals can still surface when needed. Good for applications where users ask both "what is the user's job?" and "what exactly did they say on March 12?"
 
-## Extraction tuning
+### Medical / legal records
 
-### Model choice
+Long-term, high-fidelity recall. Nothing should be forgotten.
 
 ```python
 config = CognitiveMemoryConfig(
-    extraction_model="gpt-4o-mini",
+    extraction_mode="semantic",
+    retrieval_score_exponent=0.1,  # nearly ignore decay
+    core_access_threshold=5,       # promote to core faster
+    core_stability_threshold=0.7,
+    cold_storage_ttl_days=365,     # keep cold memories longer
+    consolidation_retention_threshold=0.10,  # only consolidate very faded
+    custom_extraction_instructions="Focus on medical conditions, medications, allergies, and treatment history.",
 )
+# Search with: top_k=60, deep_recall=True
 ```
 
-- `gpt-4o-mini`: Fast, cheap, good enough for most use cases
-- `gpt-4o`: Better extraction quality, 10x cost
-- `gpt-4.1-mini`: Newer, potentially better extraction
+Low alpha means old memories rank nearly as high as recent ones. Aggressive core promotion protects important information. Long cold storage TTL and conservative consolidation prevent data loss.
 
-### Custom instructions
+### Real-time / news / rapidly changing data
+
+Information changes frequently. Old data should fade in favor of updates.
 
 ```python
 config = CognitiveMemoryConfig(
-    custom_extraction_instructions="Focus on medical information and dietary restrictions."
+    extraction_mode="semantic",
+    retrieval_score_exponent=0.7,  # strong recency bias
+    direct_boost=0.05,            # less stability reinforcement
+    cold_migration_days=3,        # move to cold faster
+    cold_storage_ttl_days=30,     # purge cold data quickly
+    consolidation_retention_threshold=0.30,  # consolidate earlier
+)
+# Search with: top_k=10, deep_recall=False
+```
+
+High alpha suppresses old memories. Fast cold migration and short TTL keep the active set small and current.
+
+### Batch import / benchmark
+
+Migrating historical data. Speed matters, not real-time behavior.
+
+```python
+config = CognitiveMemoryConfig(
+    run_maintenance_during_ingestion=False,
+)
+mem = CognitiveMemory(config=config)
+
+for conv in conversations:
+    await mem.extract_and_store(conv, session_id=..., run_tick=False)
+
+# Run maintenance once at the end
+await mem.tick()
+```
+
+Disabling maintenance during ingestion avoids O(n) cold-migration checks after every batch.
+
+---
+
+## Parameter-by-parameter guide
+
+### Extraction mode
+
+`extraction_mode` controls how conversations become memories. See [Ingestion Pipeline](/concepts/ingestion/) for detailed comparison.
+
+| Mode | LLM cost | Storage | Best for |
+|------|:--------:|:-------:|----------|
+| `"semantic"` | Yes | Low | Most applications |
+| `"raw"` | No | Medium | Exact recall, low latency |
+| `"hybrid"` | Yes | High | Both structured and verbatim recall |
+
+### Extraction model
+
+`extraction_model` sets the LLM used for fact extraction (semantic and hybrid modes only).
+
+| Model | Quality | Cost | Speed |
+|-------|:-------:|:----:|:-----:|
+| `gpt-4o-mini` | Good | Low | Fast |
+| `gpt-4o` | Better | 10x | Slower |
+| `gpt-4.1-mini` | Good | Low | Fast |
+
+Upgrade to `gpt-4o` if extraction quality is the bottleneck (e.g., missing important facts, poor categorization). For most applications, `gpt-4o-mini` is sufficient.
+
+### Custom extraction instructions
+
+`custom_extraction_instructions` prepends domain-specific guidance to the extraction prompt.
+
+```python
+# Medical assistant
+config = CognitiveMemoryConfig(
+    custom_extraction_instructions="Focus on medical conditions, medications, dosages, allergies, and treatment outcomes. Classify all medical facts as core."
+)
+
+# E-commerce
+config = CognitiveMemoryConfig(
+    custom_extraction_instructions="Track product preferences, sizes, brands, past purchases, and return history."
 )
 ```
 
-Use this to bias extraction toward your domain-specific needs.
+Use this when the default extraction misses domain-specific information or assigns wrong importance/categories.
+
+### Retrieval score exponent (alpha)
+
+`retrieval_score_exponent` controls how much memory decay affects search ranking. The scoring formula is `score = similarity * retention^alpha`.
+
+| Value | Behavior | Use case |
+|:-----:|----------|----------|
+| 0.1 | Nearly ignores decay. Old and new memories rank equally. | Medical records, legal, archival |
+| 0.3 | **Default.** Balanced recency bias. | Personal assistants, chatbots |
+| 0.5 | Moderate recency bias. Recent memories preferred. | News, evolving topics |
+| 0.7-1.0 | Strong recency bias. Old memories effectively suppressed. | Real-time data, trending topics |
+
+**This is the single most impactful parameter for retrieval quality.** Tune this first.
+
+### top_k (search parameter)
+
+Not a config parameter — passed to `search()`. But it's the most impactful retrieval knob.
+
+| Value | Effect | Use case |
+|:-----:|--------|----------|
+| 5-10 | Precise, may miss relevant memories | Simple Q&A, low latency |
+| 20-40 | Balanced recall and precision | Most applications |
+| 50-60 | Broad recall, catches weak matches | With re-ranking, complex queries |
+
+Our benchmarks showed +14pp accuracy improvement going from k=10 to k=60. If you're missing relevant memories, increase k first.
+
+### Deep recall (search parameter)
+
+```python
+results = await mem.search(query, deep_recall=True)
+```
+
+When enabled, superseded memories (originals that were consolidated into summaries) are included in search results with a penalty (`deep_recall_penalty`, default 0.5x score).
+
+**Enable when:** Users need specific dates, names, or numbers that may have been lost during consolidation.
+
+**Disable when:** You want clean, deduplicated results and don't need historical granularity.
+
+### Retrieval boosting
+
+Controls how much retrieving a memory strengthens it (spaced repetition).
+
+| Parameter | Default | Effect of increasing |
+|-----------|:-------:|----------------------|
+| `direct_boost` | 0.1 | Memories stabilize faster with fewer retrievals |
+| `associative_boost` | 0.03 | Linked memories strengthen more from co-retrieval |
+| `max_spaced_rep_multiplier` | 2.0 | Larger bonus for accessing long-idle memories |
+| `spaced_rep_interval_days` | 7.0 | Full bonus kicks in sooner after last access |
+
+**If memories fade too fast:** Increase `direct_boost` to 0.15-0.20.
+
+**If memories never fade:** Decrease `direct_boost` to 0.05 and lower `max_spaced_rep_multiplier` to 1.5.
+
+### Core promotion
+
+Core memories have a high retention floor (0.60) and never get cold-migrated. Three conditions must ALL be met:
+
+| Parameter | Default | Effect of lowering |
+|-----------|:-------:|-------------------|
+| `core_access_threshold` | 10 | Fewer retrievals needed for promotion |
+| `core_stability_threshold` | 0.85 | Lower stability bar for promotion |
+| `core_session_threshold` | 3 | Fewer distinct sessions needed |
+
+**Too few core promotions?** Lower all three (e.g., 5, 0.7, 2).
+
+**Too many core promotions?** Raise `core_access_threshold` to 15-20 and `core_session_threshold` to 5+. Over-promoting makes the system "sticky" — old information never fades.
+
+### Decay parameters
+
+| Parameter | Default | Description |
+|-----------|:-------:|-------------|
+| `faint_threshold` | 0.15 | Retention below this = "faint" memory |
+
+Base decay rates are category-level constants:
+
+| Category | Decay rate (days) | Floor | Behavior |
+|----------|:-----------------:|:-----:|----------|
+| Episodic | 45 | 0.02 | Fades relatively fast |
+| Semantic | 120 | 0.02 | Fades slowly |
+| Procedural | Infinity | 0.02 | Never decays |
+| Core | 120 | 0.60 | Fades slowly, high floor |
+
+You can't change base decay rates via config — they're set by memory category. To make memories last longer, increase `direct_boost` or use `custom_extraction_instructions` to bias toward higher importance scores (stability = 0.1 + importance * 0.3).
+
+### Associations
+
+Controls how memories link to each other and activate during retrieval.
+
+| Parameter | Default | Effect of changing |
+|-----------|:-------:|-------------------|
+| `association_strengthen_amount` | 0.1 | Higher = associations build faster per co-retrieval |
+| `association_retrieval_threshold` | 0.3 | Lower = more associations activate (more multi-hop, more noise) |
+| `association_decay_constant_days` | 90 | Higher = associations persist longer without reinforcement |
+
+**For multi-hop reasoning:** Lower `association_retrieval_threshold` to 0.2 and increase `association_decay_constant_days` to 120-180.
+
+**For precision (less noise):** Raise `association_retrieval_threshold` to 0.4.
+
+### Consolidation
+
+Controls when and how fading memories get merged into summaries.
+
+| Parameter | Default | Effect of changing |
+|-----------|:-------:|-------------------|
+| `consolidation_retention_threshold` | 0.20 | Higher = consolidate earlier (less storage, but lose detail sooner) |
+| `consolidation_group_size` | 5 | Lower = more frequent consolidation events |
+| `consolidation_similarity_threshold` | 0.70 | Lower = larger, more diverse groups |
+
+**For archival applications:** Lower threshold to 0.10 (only consolidate very faded memories).
+
+**For high-throughput applications:** Raise threshold to 0.30 and lower group size to 3.
+
+### Tiered storage
+
+Controls when memories leave hot storage and when cold memories expire.
+
+| Parameter | Default | Effect of changing |
+|-----------|:-------:|-------------------|
+| `cold_migration_days` | 7 | Lower = memories leave hot store faster (less search noise, but may lose multi-hop paths) |
+| `cold_storage_ttl_days` | 180 | Higher = cold memories survive longer before becoming stubs |
+
+**For long-term applications:** Set `cold_storage_ttl_days` to 365+.
+
+**For ephemeral applications:** Set `cold_migration_days` to 3 and `cold_storage_ttl_days` to 30.
+
+### Embedding
+
+| Parameter | Default | Description |
+|-----------|:-------:|-------------|
+| `embedding_model` | `"text-embedding-3-small"` | OpenAI embedding model |
+| `embedding_dimensions` | 1536 | Vector dimensions |
+
+Higher dimensions (3072 with `text-embedding-3-large`) give better similarity discrimination at the cost of storage and search speed. For most applications, 1536 dimensions with `text-embedding-3-small` is the right trade-off.
+
+---
 
 ## Measuring quality
 
@@ -194,3 +302,10 @@ The best way to measure tuning impact:
 5. Track overall accuracy and multi-hop accuracy separately
 
 Avoid tuning on individual examples — optimize for aggregate metrics across your test set.
+
+### Key interactions
+
+- `retrieval_score_exponent` and `direct_boost` interact: higher alpha makes boosting more impactful
+- `consolidation_retention_threshold` and `cold_migration_days` together control when memories leave hot storage
+- `core_access_threshold` and `core_stability_threshold` create a compound requirement: lowering one doesn't help if the other is too high
+- `extraction_mode="hybrid"` with `deep_recall=True` gives maximum recall at the cost of more noise — pair with higher `top_k` and re-ranking

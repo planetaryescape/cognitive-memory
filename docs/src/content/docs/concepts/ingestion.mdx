@@ -113,10 +113,68 @@ memory = await mem.add(
 )
 ```
 
+## Extraction modes
+
+The `extraction_mode` parameter controls how conversations become memories. Choose based on your use case.
+
+### `"semantic"` (default)
+
+LLM extracts structured facts from conversation text. Best for most applications.
+
+```python
+config = CognitiveMemoryConfig(extraction_mode="semantic")
+```
+
+**Strengths:** Deduplicates redundant information, classifies by category, assigns importance, resolves relative dates, captures multi-hop reasoning chains.
+
+**Weaknesses:** May lose exact wording, timestamps can be paraphrased, LLM cost per ingestion.
+
+**Best for:** Personal assistants, customer support bots, medical/legal record systems — anywhere you need structured recall over long periods.
+
+### `"raw"`
+
+Each conversation turn is stored verbatim as an episodic memory. No LLM is called during ingestion.
+
+```python
+config = CognitiveMemoryConfig(extraction_mode="raw")
+```
+
+**Strengths:** Zero extraction cost, preserves exact quotes and timestamps, no information loss, fast ingestion.
+
+**Weaknesses:** No deduplication, no importance scoring, no category classification, higher storage volume, retrieval relies entirely on embedding similarity.
+
+**Best for:** Dialog systems where exact recall matters (trivia, roleplay), low-latency applications, when you want to handle extraction yourself.
+
+### `"hybrid"`
+
+Runs both: LLM extracts structured facts AND raw turns are stored. Retrieval searches across both.
+
+```python
+config = CognitiveMemoryConfig(extraction_mode="hybrid")
+```
+
+**Strengths:** Combines structured reasoning with verbatim recall. Questions about facts hit extracted memories; questions about exact wording hit raw turns.
+
+**Weaknesses:** ~2x storage, LLM cost for extraction, more memories to search through.
+
+**Best for:** Applications that need both structured recall and exact-quote retrieval — e.g., a personal assistant that should know "the user is allergic to peanuts" (semantic) AND be able to recall "what did the user say on March 12?" (raw).
+
+### Choosing between modes
+
+| Question | Answer | Recommended mode |
+|----------|--------|:----------------:|
+| Do I need exact quotes from past conversations? | Yes | `raw` or `hybrid` |
+| Is LLM cost during ingestion acceptable? | No | `raw` |
+| Do I need multi-hop reasoning across sessions? | Yes | `semantic` or `hybrid` |
+| Are my questions about specific dates and times? | Yes | `hybrid` |
+| Is storage cost a concern? | Yes | `semantic` |
+| Do I need both structured facts and verbatim recall? | Yes | `hybrid` |
+
 ## Configuration
 
 ```python
 config = CognitiveMemoryConfig(
+    extraction_mode="semantic",              # "raw" | "semantic" | "hybrid"
     extraction_model="gpt-4o-mini",         # LLM for extraction
     embedding_model="text-embedding-3-small", # embedding model
     embedding_dimensions=1536,               # embedding vector size

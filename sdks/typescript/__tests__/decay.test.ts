@@ -15,31 +15,33 @@ describe("decay", () => {
       stability: 0.3,
       importance: 0.5,
       lastAccessed: Date.now() - 10_000_000_000,
-      memoryType: "procedural",
+      category: "procedural",
     });
     expect(retention).toBe(1.0);
   });
 
-  test("fresh episodic ~0.97 at 1 day (stability 0.5, importance 0.5)", () => {
+  test("fresh episodic ~0.98 at 1 day (stability 0.5, importance 0.5)", () => {
+    // With episodic=45, S=0.5, B=2.0: effectiveRate=45, retention=exp(-1/45)=0.978
     const retention = calculateRetention({
       stability: 0.5,
       importance: 0.5,
       lastAccessed: Date.now() - 24 * 60 * 60 * 1000,
-      memoryType: "episodic",
+      category: "episodic",
     });
-    expect(retention).toBeGreaterThan(0.96);
-    expect(retention).toBeLessThan(0.98);
+    expect(retention).toBeGreaterThan(0.97);
+    expect(retention).toBeLessThan(0.99);
   });
 
-  test("month-old episodic ~0.37 at 30 days (stability 0.5, importance 0.5)", () => {
+  test("month-old episodic ~0.51 at 30 days (stability 0.5, importance 0.5)", () => {
+    // With episodic=45, S=0.5, B=2.0: effectiveRate=45, retention=exp(-30/45)=0.513
     const retention = calculateRetention({
       stability: 0.5,
       importance: 0.5,
       lastAccessed: Date.now() - 30 * 24 * 60 * 60 * 1000,
-      memoryType: "episodic",
+      category: "episodic",
     });
-    expect(retention).toBeGreaterThan(0.35);
-    expect(retention).toBeLessThan(0.39);
+    expect(retention).toBeGreaterThan(0.50);
+    expect(retention).toBeLessThan(0.53);
   });
 
   test("higher importance slows decay", () => {
@@ -47,13 +49,13 @@ describe("decay", () => {
       stability: 0.5,
       importance: 0.1,
       lastAccessed: Date.now() - 30 * 24 * 60 * 60 * 1000,
-      memoryType: "semantic",
+      category: "semantic",
     });
     const high = calculateRetention({
       stability: 0.5,
       importance: 0.9,
       lastAccessed: Date.now() - 30 * 24 * 60 * 60 * 1000,
-      memoryType: "semantic",
+      category: "semantic",
     });
     expect(high).toBeGreaterThan(low);
   });
@@ -63,33 +65,35 @@ describe("decay", () => {
       stability: 0.2,
       importance: 0.5,
       lastAccessed: Date.now() - 30 * 24 * 60 * 60 * 1000,
-      memoryType: "semantic",
+      category: "semantic",
     });
     const high = calculateRetention({
       stability: 0.8,
       importance: 0.5,
       lastAccessed: Date.now() - 30 * 24 * 60 * 60 * 1000,
-      memoryType: "semantic",
+      category: "semantic",
     });
     expect(high).toBeGreaterThan(low);
   });
 
-  test("higher accessCount slows decay (frequency boost)", () => {
-    const low = calculateRetention({
-      stability: 0.5,
-      importance: 0.5,
-      accessCount: 0,
-      lastAccessed: Date.now() - 30 * 24 * 60 * 60 * 1000,
-      memoryType: "semantic",
+  test("core memories have 0.60 retention floor", () => {
+    const retention = calculateRetention({
+      stability: 0.1,
+      importance: 0.1,
+      lastAccessed: Date.now() - 365 * 24 * 60 * 60 * 1000,
+      category: "core",
     });
-    const high = calculateRetention({
-      stability: 0.5,
-      importance: 0.5,
-      accessCount: 100,
-      lastAccessed: Date.now() - 30 * 24 * 60 * 60 * 1000,
-      memoryType: "semantic",
+    expect(retention).toBeGreaterThanOrEqual(0.60);
+  });
+
+  test("regular memories have 0.02 retention floor", () => {
+    const retention = calculateRetention({
+      stability: 0.1,
+      importance: 0.1,
+      lastAccessed: Date.now() - 365 * 24 * 60 * 60 * 1000,
+      category: "episodic",
     });
-    expect(high).toBeGreaterThan(low);
+    expect(retention).toBeGreaterThanOrEqual(0.02);
   });
 
   test("updateStability increases correctly + caps at 1.0", () => {
@@ -105,7 +109,18 @@ describe("decay", () => {
       stability: 0.5,
       importance: 0.5,
       lastAccessed: Date.now() + 10 * 24 * 60 * 60 * 1000,
-      memoryType: "semantic",
+      category: "semantic",
+    });
+    expect(retention).toBe(1.0);
+  });
+
+  test("backward compat: memoryType field still works", () => {
+    const retention = calculateRetention({
+      stability: 0.5,
+      importance: 0.5,
+      lastAccessed: Date.now() - 10_000_000_000,
+      category: "procedural",
+      memoryType: "procedural",
     });
     expect(retention).toBe(1.0);
   });
