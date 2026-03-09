@@ -18,6 +18,7 @@ from .types import (
     MemoryCategory,
     CognitiveMemoryConfig,
     SearchResult,
+    SearchResponse,
 )
 from .adapters.base import MemoryAdapter
 from .adapters.memory import InMemoryAdapter
@@ -237,7 +238,8 @@ class CognitiveMemory:
         timestamp: Optional[datetime] = None,
         session_id: Optional[str] = None,
         deep_recall: bool = False,
-    ) -> list[SearchResult]:
+        trace: bool = False,
+    ) -> SearchResponse:
         """
         Search memories with full retention-weighted scoring.
 
@@ -247,6 +249,7 @@ class CognitiveMemory:
             timestamp: when the query happens (for decay calc). Defaults to now.
             session_id: current session (for boost tracking)
             deep_recall: include superseded originals (Section 3.8)
+            trace: include per-stage instrumentation in response
         """
         now = timestamp or datetime.now()
         query_embedding = self._embedder.embed(query)
@@ -257,6 +260,9 @@ class CognitiveMemory:
             top_k=top_k,
             session_id=session_id,
             deep_recall=deep_recall,
+            query_text=query,
+            trace=trace,
+            extractor=self._extractor if self.config.rerank_enabled else None,
         )
 
     # ------------------------------------------------------------------
