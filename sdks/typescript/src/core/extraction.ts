@@ -9,12 +9,17 @@
  * 5. Compress memory groups during consolidation
  */
 
-import type { Memory, MemoryCategory, ResolvedCognitiveMemoryConfig } from "./types";
+import type { Memory, MemoryCategory, ResolvedCognitiveMemoryConfig, SemanticType } from "./types";
 import { createDefaultMemory } from "./types";
 
 // ---------------------------------------------------------------------------
 // LLM Provider interface
 // ---------------------------------------------------------------------------
+
+export interface LLMUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+}
 
 export interface LLMProvider {
   complete(
@@ -25,6 +30,19 @@ export interface LLMProvider {
       temperature?: number;
     },
   ): Promise<string>;
+
+  /**
+   * Optional: complete with token usage tracking.
+   * If not implemented, falls back to complete() with no usage info.
+   */
+  completeWithUsage?(
+    prompt: string,
+    options?: {
+      model?: string;
+      maxTokens?: number;
+      temperature?: number;
+    },
+  ): Promise<{ text: string; usage: LLMUsage }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -43,6 +61,15 @@ For each memory, provide:
   - "episodic": specific one-time events with dates/times
   - "procedural": routines, habits, skills
 - importance: 0.0 to 1.0
+- memory_type: "fact" | "preference" | "plan" | "transient_state" | "other"
+  - "fact": verifiable statement about world or user (e.g. "Alex is 32 years old")
+  - "preference": user likes/dislikes (e.g. "Alex prefers dark roast coffee")
+  - "plan": future intention or scheduled event (e.g. "Alex has a meeting at 3pm tomorrow")
+  - "transient_state": temporary mood, location, current activity (e.g. "Alex is currently at the airport")
+  - "other": default if none of the above apply
+- valid_from: (optional) ISO date string when this becomes valid. Only for time-bounded memories.
+- valid_until: (optional) ISO date string when this expires. Use for plans and transient states.
+- source_turn_ids: (optional) array of turn numbers this was extracted from (e.g. [1, 3])
 
 CRITICAL RULES:
 1. NARRATE, don't interpret. Store WHAT HAPPENED, not what it means.
@@ -61,7 +88,7 @@ Conversation:
 {conversation}
 
 Respond with a JSON array only. No markdown, no preamble.
-Example: [{"content": "Alex is a 32-year-old software engineer", "category": "core", "importance": 0.9}, {"content": "Alex is single", "category": "core", "importance": 0.7}, {"content": "Alex moved from Germany three years ago", "category": "core", "importance": 0.8}, {"content": "Sam has two dogs named Biscuit and Maple", "category": "core", "importance": 0.8}, {"content": "Alex finished reading The Great Gatsby in January 2024", "category": "episodic", "importance": 0.5}, {"content": "Sam ran a 5K for charity the weekend before March 10, 2024", "category": "episodic", "importance": 0.5}]`;
+Example: [{"content": "Alex is a 32-year-old software engineer", "category": "core", "importance": 0.9, "memory_type": "fact"}, {"content": "Alex prefers window seats on flights", "category": "semantic", "importance": 0.5, "memory_type": "preference"}, {"content": "Alex has a dentist appointment on March 15, 2024", "category": "episodic", "importance": 0.6, "memory_type": "plan", "valid_until": "2024-03-15T23:59:59"}, {"content": "Alex is currently feeling stressed about the deadline", "category": "episodic", "importance": 0.4, "memory_type": "transient_state"}, {"content": "Sam ran a 5K for charity the weekend before March 10, 2024", "category": "episodic", "importance": 0.5, "memory_type": "fact"}]`;
 
 export const CONFLICT_PROMPT = `Does the new memory contradict or update an existing memory?
 
@@ -73,6 +100,15 @@ Respond with exactly one word: CONTRADICTION, UPDATE, OVERLAP, or NONE.
 - UPDATE: the new memory is a newer version of the same fact
 - OVERLAP: they cover similar ground but don't conflict
 - NONE: they are unrelated`;
+
+export const RERANK_PROMPT = `Given the query and a list of candidate memories, rerank them by relevance. Return a JSON array of indices (0-based) from most to least relevant. Only include indices of memories that are relevant to the query.
+
+Query: "{query}"
+
+Candidates:
+{candidates}
+
+Respond with a JSON array of indices only, e.g. [2, 0, 4, 1]. No explanation.`;
 
 export const CONSOLIDATION_PROMPT = `Compress these related memories into a single concise summary that preserves all key facts.
 
@@ -92,6 +128,17 @@ export type ConflictType = "CONTRADICTION" | "UPDATE" | "OVERLAP" | "NONE";
 // ---------------------------------------------------------------------------
 
 const VALID_CATEGORIES = new Set<MemoryCategory>(["episodic", "semantic", "procedural", "core"]);
+const VALID_SEMANTIC_TYPES = new Set<SemanticType>(["fact", "preference", "plan", "transient_state", "other"]);
+
+function parseOptionalTimestamp(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
 
 export async function extractFromConversation(
   conversationText: string,
@@ -154,6 +201,21 @@ function buildMemories(
 
     const stability = 0.1 + importance * 0.3;
 
+    // v6: Parse semantic type and validity
+    const rawSemanticType = typeof item.memory_type === "string" ? item.memory_type : "other";
+    const semanticType: SemanticType = VALID_SEMANTIC_TYPES.has(rawSemanticType as SemanticType)
+      ? (rawSemanticType as SemanticType)
+      : "other";
+
+    const validFrom = parseOptionalTimestamp(item.valid_from);
+    const validUntil = parseOptionalTimestamp(item.valid_until);
+    const ttlSeconds = typeof item.ttl_seconds === "number" ? Math.floor(item.ttl_seconds) : null;
+
+    let sourceTurnIds: string[] = [];
+    if (Array.isArray(item.source_turn_ids)) {
+      sourceTurnIds = item.source_turn_ids.map((t: unknown) => String(t));
+    }
+
     memories.push({
       userId: config.userId,
       content,
@@ -173,6 +235,11 @@ function buildMemories(
       supersededBy: null,
       isStub: false,
       contradictedBy: null,
+      semanticType,
+      validFrom,
+      validUntil,
+      ttlSeconds,
+      sourceTurnIds,
     });
   }
 
@@ -217,6 +284,11 @@ export function extractRawTurns(
       supersededBy: null,
       isStub: false,
       contradictedBy: null,
+      semanticType: "other",
+      validFrom: null,
+      validUntil: null,
+      ttlSeconds: null,
+      sourceTurnIds: [],
     });
   }
 
@@ -267,4 +339,68 @@ export async function compressMemories(
     maxTokens: 500,
     temperature: 0,
   });
+}
+
+// ---------------------------------------------------------------------------
+// LLM reranking (v6)
+// ---------------------------------------------------------------------------
+
+export interface RerankResult {
+  rerankedIndices: number[];
+  usage: LLMUsage;
+}
+
+export async function rerankCandidates(
+  query: string,
+  candidates: Array<{ content: string }>,
+  llm: LLMProvider,
+  config: ResolvedCognitiveMemoryConfig,
+): Promise<RerankResult> {
+  const numbered = candidates
+    .map((c, i) => `[${i}] ${c.content}`)
+    .join("\n");
+  const prompt = RERANK_PROMPT
+    .replace("{query}", query)
+    .replace("{candidates}", numbered);
+
+  const model = config.rerankModel ?? config.extractionModel;
+  let text: string;
+  let usage: LLMUsage = {};
+
+  if (llm.completeWithUsage) {
+    const result = await llm.completeWithUsage(prompt, {
+      model,
+      maxTokens: 200,
+      temperature: 0,
+    });
+    text = result.text;
+    usage = result.usage;
+  } else {
+    text = await llm.complete(prompt, {
+      model,
+      maxTokens: 200,
+      temperature: 0,
+    });
+  }
+
+  try {
+    let cleaned = text.trim();
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+    }
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) {
+      const indices = parsed
+        .filter((n): n is number => typeof n === "number" && n >= 0 && n < candidates.length)
+        .filter((n, i, arr) => arr.indexOf(n) === i); // dedup
+      return { rerankedIndices: indices, usage };
+    }
+  } catch {
+    // Fallback: return original order
+  }
+
+  return {
+    rerankedIndices: candidates.map((_, i) => i),
+    usage,
+  };
 }
