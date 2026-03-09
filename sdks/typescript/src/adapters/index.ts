@@ -3,3 +3,7 @@ export { MemoryAdapter } from "./base";
 export { InMemoryAdapter } from "./memory";
 export type { ConvexAdapterFunctions } from "./convex";
 export { ConvexAdapter } from "./convex";
+export type { PostgresAdapterOptions } from "./postgres";
+export { PostgresAdapter, postgresSchemaSql } from "./postgres";
+export type { JsonlFileAdapterOptions } from "./jsonl";
+export { JsonlFileAdapter } from "./jsonl";

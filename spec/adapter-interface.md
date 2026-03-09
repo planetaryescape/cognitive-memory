@@ -96,6 +96,17 @@ Find memories closest to a given embedding vector.
 | **Returns** | List of `(Memory, similarity_score)` tuples, sorted by score descending. | Array of `[Memory, score]` tuples, sorted by score descending. |
 | **Notes** | Similarity metric is cosine similarity. Superseded memories, if included, should be returned alongside active ones without special ordering. | Same |
 
+### search_lexical / searchLexical
+
+**(Optional)** Perform a keyword/lexical (non-vector) search over memory content.
+
+| | Python | TypeScript |
+|---|---|---|
+| **Signature** | `async def search_lexical(self, query: str, top_k: int = 10, include_superseded: bool = False) -> list[tuple[Memory, float]]` | `searchLexical(query: string, filters?: MemoryFilters): Promise<ScoredMemory[]>` |
+| **Args** | `query` — keyword search string. `top_k` — max results. `include_superseded` — if True, include superseded memories. | `query` — keyword search string. `filters` — optional filters (top_k, includeSuperseded, etc.). |
+| **Returns** | List of `(Memory, relevance_score)` tuples, sorted by score descending. | Array of `ScoredMemory`, sorted by score descending. |
+| **Notes** | Optional method. Adapters that do not support lexical search should return an empty list. The default base-class implementation returns `[]`. Used by the hybrid search pipeline to combine with vector results. | Same |
+
 ---
 
 ## Tiering

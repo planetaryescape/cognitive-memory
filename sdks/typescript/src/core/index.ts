@@ -5,11 +5,13 @@ export {
   extractFromConversation,
   detectConflict,
   compressMemories,
+  rerankCandidates,
   EXTRACTION_PROMPT,
   CONFLICT_PROMPT,
   CONSOLIDATION_PROMPT,
+  RERANK_PROMPT,
 } from "./extraction";
-export type { LLMProvider, ConflictType } from "./extraction";
+export type { LLMProvider, LLMUsage, ConflictType, RerankResult } from "./extraction";
 export {
   OpenAIEmbeddingProvider,
   HashEmbeddingProvider,
@@ -40,5 +42,9 @@ export type {
   ResolvedCognitiveMemoryConfig,
   RetrievalQuery,
   ScoredMemory,
+  SearchResponse,
   SearchResult,
+  SearchTrace,
+  SemanticType,
+  StageTrace,
 } from "./types";

@@ -85,6 +85,21 @@ export abstract class MemoryAdapter {
   ): Promise<ScoredMemory[]>;
 
   // ------------------------------------------------------------------
+  // Lexical search (optional, for hybrid retrieval)
+  // ------------------------------------------------------------------
+
+  /**
+   * BM25/lexical search. Override in adapters that support it.
+   * Default: returns empty array (dense-only fallback).
+   */
+  async searchLexical(
+    _query: string,
+    _filters?: MemoryFilters,
+  ): Promise<ScoredMemory[]> {
+    return [];
+  }
+
+  // ------------------------------------------------------------------
   // Retention
   // ------------------------------------------------------------------
 

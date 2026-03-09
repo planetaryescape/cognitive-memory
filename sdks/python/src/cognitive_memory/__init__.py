@@ -20,6 +20,9 @@ from .types import (
     MemoryCategory,
     CognitiveMemoryConfig,
     SearchResult,
+    SearchResponse,
+    SearchTrace,
+    StageTrace,
     Association,
 )
 from .engine import CognitiveEngine
@@ -46,6 +49,9 @@ __all__ = [
     "Memory",
     "MemoryCategory",
     "SearchResult",
+    "SearchResponse",
+    "SearchTrace",
+    "StageTrace",
     "Association",
     # Engine
     "CognitiveEngine",

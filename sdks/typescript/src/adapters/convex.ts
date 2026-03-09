@@ -6,7 +6,7 @@
 
 import type { ConvexClient } from "convex/browser";
 import type { FunctionReference } from "convex/server";
-import type { Memory, MemoryCategory, ScoredMemory } from "../core/types";
+import type { Memory, MemoryCategory, SemanticType, ScoredMemory } from "../core/types";
 import { createDefaultMemory } from "../core/types";
 import { MemoryAdapter, type MemoryFilters } from "./base";
 
@@ -447,6 +447,11 @@ export class ConvexAdapter extends MemoryAdapter {
       isSuperseded: typeof raw.isSuperseded === "boolean" ? raw.isSuperseded : false,
       supersededBy: typeof raw.supersededBy === "string" ? raw.supersededBy : null,
       isStub: typeof raw.isStub === "boolean" ? raw.isStub : false,
+      semanticType: (typeof raw.semanticType === "string" ? raw.semanticType : "other") as SemanticType,
+      validFrom: typeof raw.validFrom === "number" ? raw.validFrom : null,
+      validUntil: typeof raw.validUntil === "number" ? raw.validUntil : null,
+      ttlSeconds: typeof raw.ttlSeconds === "number" ? raw.ttlSeconds : null,
+      sourceTurnIds: Array.isArray(raw.sourceTurnIds) ? raw.sourceTurnIds.filter((s: unknown) => typeof s === "string") : [],
     });
   }
 }
