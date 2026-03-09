@@ -15,8 +15,8 @@ import {
   extractRawTurns,
   detectConflict,
   compressMemories,
-  type LLMProvider,
 } from "./extraction";
+import type { LLMProvider } from "./extraction";
 import type {
   CognitiveMemoryConfig,
   ConsolidationResult,
@@ -27,6 +27,7 @@ import type {
   ResolvedCognitiveMemoryConfig,
   RetrievalQuery,
   ScoredMemory,
+  SearchResponse,
   SearchResult,
 } from "./types";
 import { resolveConfig, getRetentionFloor } from "./types";
@@ -122,6 +123,11 @@ export class CognitiveMemory {
       supersededBy: null,
       isStub: false,
       contradictedBy: null,
+      semanticType: input.semanticType ?? "other",
+      validFrom: input.validFrom ?? null,
+      validUntil: input.validUntil ?? null,
+      ttlSeconds: input.ttlSeconds ?? null,
+      sourceTurnIds: [],
     };
 
     return this.adapter.createMemory(memory);
@@ -245,14 +251,15 @@ export class CognitiveMemory {
   /**
    * Search using the full 6-step retrieval pipeline from the engine.
    *
-   * Returns SearchResult[] with detailed scoring information.
+   * Returns SearchResponse with results, evidence chains, and optional trace.
    */
-  async search(query: RetrievalQuery): Promise<SearchResult[]> {
+  async search(query: RetrievalQuery, llm?: LLMProvider): Promise<SearchResponse> {
     const {
       query: queryText,
       limit = 10,
       sessionId,
       deepRecall = false,
+      trace = false,
     } = query;
 
     assertNonEmptyString("query", queryText);
@@ -260,7 +267,7 @@ export class CognitiveMemory {
     const queryEmbedding = await this.embedWithRetry(queryText);
     const now = Date.now();
 
-    return this.engine.search(queryEmbedding, now, limit, sessionId, deepRecall);
+    return this.engine.search(queryEmbedding, now, limit, sessionId, deepRecall, queryText, trace, llm);
   }
 
   /**

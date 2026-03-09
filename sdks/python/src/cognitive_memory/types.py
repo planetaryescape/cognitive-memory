@@ -68,6 +68,29 @@ class CognitiveMemoryConfig:
     # Deep recall (Section 3.8)
     deep_recall_penalty: float = 0.5
 
+    # Hybrid retrieval (v6)
+    hybrid_search: bool = False
+    k_sparse: int = 30  # top-k for BM25 lexical search
+
+    # Validity filtering (v6)
+    filter_expired_transients: bool = True
+    include_expired_in_deep_recall: bool = True
+
+    # Graph expansion / bridge discovery (v6)
+    graph_expansion_hops: int = 1  # 0=disabled, 1 or 2
+    bridge_discovery: bool = False
+    max_bridge_paths: int = 3
+    min_bridge_edge_weight: float = 0.3
+
+    # LLM rerank (v6)
+    rerank_enabled: bool = False
+    k_rerank: int = 10  # top candidates to send to LLM for reranking
+    rerank_model: Optional[str] = None  # defaults to extraction_model if None
+
+    # Decay model
+    decay_model: str = "exponential"  # "exponential" | "power"
+    power_decay_gamma: float = 1.4427  # 1/ln(2), calibrated match point
+
     # Retrieval scoring
     retrieval_score_exponent: float = 0.3  # alpha in score = sim * R^alpha
 
@@ -128,6 +151,13 @@ class Memory:
     # Summary stub (for TTL-deleted memories)
     is_stub: bool = False
 
+    # v6: Semantic type classification (orthogonal to category)
+    memory_type: str = "other"  # "fact" | "preference" | "plan" | "transient_state" | "other"
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+    ttl_seconds: Optional[int] = None
+    source_turn_ids: list[str] = field(default_factory=list)
+
     @property
     def floor(self) -> float:
         if self.category == MemoryCategory.CORE:
@@ -156,3 +186,31 @@ class SearchResult:
     combined_score: float   # relevance * retention
     is_associative: bool = False  # came via association, not direct match
     via_deep_recall: bool = False
+    evidence_chains: list[list[str]] = field(default_factory=list)  # v6: bridge paths (memory ID chains)
+
+
+@dataclass
+class StageTrace:
+    """Timing and stats for a single pipeline stage."""
+    name: str = ""
+    wall_ms: float = 0.0
+    candidate_count: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class SearchTrace:
+    """Per-query instrumentation trace."""
+    total_wall_ms: float = 0.0
+    total_tokens: int = 0
+    stages: dict[str, StageTrace] = field(default_factory=dict)
+
+
+@dataclass
+class SearchResponse:
+    """Full search response with results, evidence chains, and optional trace."""
+    results: list[SearchResult] = field(default_factory=list)
+    evidence_chains: list[list[str]] = field(default_factory=list)
+    trace: Optional[SearchTrace] = None

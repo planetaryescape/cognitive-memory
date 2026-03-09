@@ -27,6 +27,11 @@ class Memory:
     superseded_by: str | None            # ID of the memory that supersedes this one
     contradicted_by: str | None          # ID of the memory that contradicted this one
     is_stub: bool                        # True if converted to a lightweight stub
+    memory_type: str                     # Semantic type: "fact", "preference", "plan", "transient_state", "other"
+    valid_from: Optional[datetime]       # Start of temporal validity window (None = always valid)
+    valid_until: Optional[datetime]      # End of temporal validity window (None = no expiry)
+    ttl_seconds: Optional[int]           # Time-to-live in seconds from creation (None = no TTL)
+    source_turn_ids: list[str]           # Conversation turn IDs that contributed to this memory
 ```
 
 ### Field Details
@@ -51,6 +56,11 @@ class Memory:
 | `superseded_by` | `str \| None` | `None` | ID of the replacement memory. Forms a chain for tracking memory evolution. |
 | `contradicted_by` | `str \| None` | `None` | ID of the memory that introduced the contradiction. May differ from `superseded_by` if resolution created a third memory. |
 | `is_stub` | `bool` | `False` | Set to `True` when the memory is converted to a stub. Stubs retain `id`, `content` (summary), and association references but drop the embedding. |
+| `memory_type` | `str` | `"other"` | Semantic type of the memory. Values: `"fact"`, `"preference"`, `"plan"`, `"transient_state"`, `"other"`. Distinct from `category` which is a free-form classification label. |
+| `valid_from` | `Optional[datetime]` | `None` | Start of the temporal validity window. `None` means the memory is valid from creation. |
+| `valid_until` | `Optional[datetime]` | `None` | End of the temporal validity window. `None` means no scheduled expiry. |
+| `ttl_seconds` | `Optional[int]` | `None` | Time-to-live in seconds from creation. When set, the memory should be considered expired after `created_at + ttl_seconds`. `None` means no TTL. |
+| `source_turn_ids` | `list[str]` | `[]` | IDs of the conversation turns that contributed to extracting this memory. Used for provenance tracking. |
 
 ---
 
@@ -71,6 +81,19 @@ interface Memory {
   createdAt: Date;                      // Timestamp of creation
   updatedAt: Date;                      // Timestamp of last modification
   metadata: MemoryMetadata;             // Additional structured data
+  semanticType?: SemanticType;          // Semantic type classification
+  validFrom?: number | null;           // Unix ms timestamp — start of validity window
+  validUntil?: number | null;          // Unix ms timestamp — end of validity window
+  ttlSeconds?: number | null;          // Time-to-live in seconds from creation
+  sourceTurnIds?: string[];            // Conversation turn IDs that contributed to this memory
+}
+
+enum SemanticType {
+  Fact = "fact",
+  Preference = "preference",
+  Plan = "plan",
+  TransientState = "transient_state",
+  Other = "other",
 }
 
 enum MemoryType {
@@ -111,6 +134,38 @@ interface MemoryMetadata {
 | `createdAt` | `Date` | now | Immutable creation timestamp. |
 | `updatedAt` | `Date` | now | Updated on any mutation. Not present in Python (tracked implicitly). |
 | `metadata` | `MemoryMetadata` | defaults | Structured metadata. Groups tiering and lifecycle fields. |
+| `semanticType` | `SemanticType` | `undefined` | Semantic type of the memory. Values: `"fact"`, `"preference"`, `"plan"`, `"transient_state"`, `"other"`. Distinct from `memoryType` (which is deprecated). |
+| `validFrom` | `number \| null` | `undefined` | Unix ms timestamp marking the start of the validity window. `null` or `undefined` means valid from creation. |
+| `validUntil` | `number \| null` | `undefined` | Unix ms timestamp marking the end of the validity window. `null` or `undefined` means no scheduled expiry. |
+| `ttlSeconds` | `number \| null` | `undefined` | Time-to-live in seconds from creation. When set, the memory should be considered expired after `createdAt + ttlSeconds * 1000`. |
+| `sourceTurnIds` | `string[]` | `[]` | IDs of the conversation turns that contributed to extracting this memory. Used for provenance tracking. |
+
+---
+
+## Search Response Types (TypeScript)
+
+```typescript
+interface StageTrace {
+  stage: string;                        // Name of the search pipeline stage (e.g. "vector", "lexical", "rerank")
+  inputCount: number;                   // Number of candidates entering this stage
+  outputCount: number;                  // Number of candidates leaving this stage
+  durationMs: number;                   // Time spent in this stage in milliseconds
+  promptTokens: number;                 // LLM prompt tokens used in this stage (0 for non-LLM stages)
+  completionTokens: number;            // LLM completion tokens used in this stage (0 for non-LLM stages)
+  metadata?: Record<string, unknown>;   // Optional stage-specific debug data
+}
+
+interface SearchTrace {
+  totalDurationMs: number;              // Total wall-clock time for the search
+  totalTokens: number;                  // Sum of all prompt + completion tokens across stages
+  stages: StageTrace[];                 // Ordered list of pipeline stage traces
+}
+
+interface SearchResponse {
+  results: ScoredMemory[];              // Ranked results
+  trace?: SearchTrace;                  // Optional pipeline trace (included when `debug: true`)
+}
+```
 
 ---
 
@@ -139,6 +194,11 @@ interface MemoryMetadata {
 | `superseded_by` | `metadata.supersededBy` | Top-level in Python, nested in TypeScript's metadata |
 | `contradicted_by` | `metadata.contradictedBy` | Top-level in Python, nested in TypeScript's metadata |
 | `is_stub` | `metadata.isStub` | Top-level in Python, nested in TypeScript's metadata |
+| `memory_type` | `semanticType` | Python uses `memory_type` (str). TypeScript uses `semanticType` (enum) because `memoryType` is already deprecated. Same value set. |
+| `valid_from` | `validFrom` | Python `datetime`, TypeScript Unix ms `number`. |
+| `valid_until` | `validUntil` | Python `datetime`, TypeScript Unix ms `number`. |
+| `ttl_seconds` | `ttlSeconds` | Same semantics. |
+| `source_turn_ids` | `sourceTurnIds` | snake_case vs camelCase |
 
 ### Design Rationale
 

@@ -76,6 +76,23 @@ class MemoryAdapter(ABC):
         ...
 
     # ------------------------------------------------------------------
+    # Lexical search (optional, for hybrid retrieval)
+    # ------------------------------------------------------------------
+
+    async def search_lexical(
+        self,
+        query: str,
+        top_k: int = 10,
+        include_superseded: bool = False,
+    ) -> list[tuple["Memory", float]]:
+        """
+        BM25/lexical search. Override in adapters that support it.
+        Returns list of (memory, bm25_score) sorted descending.
+        Default: returns empty list (dense-only fallback).
+        """
+        return []
+
+    # ------------------------------------------------------------------
     # Tiered storage
     # ------------------------------------------------------------------
 

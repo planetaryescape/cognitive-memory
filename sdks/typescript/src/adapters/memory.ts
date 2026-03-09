@@ -168,6 +168,82 @@ export class InMemoryAdapter extends MemoryAdapter {
   }
 
   // ------------------------------------------------------------------
+  // Lexical search (BM25)
+  // ------------------------------------------------------------------
+
+  override async searchLexical(
+    query: string,
+    filters?: MemoryFilters,
+  ): Promise<ScoredMemory[]> {
+    const queryTokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (queryTokens.length === 0) return [];
+
+    let items = Array.from(this.hot.values());
+    if (!filters?.includeSuperseded)
+      items = items.filter((m) => !m.isSuperseded);
+    items = items.filter((m) => !m.isStub);
+    if (filters?.userId)
+      items = items.filter((m) => m.userId === filters.userId);
+
+    const N = items.length;
+    if (N === 0) return [];
+
+    // Build doc tokens
+    const docs = items.map((m) => ({
+      mem: m,
+      tokens: m.content.toLowerCase().split(/\s+/).filter(Boolean),
+    }));
+
+    const avgdl = docs.reduce((sum, d) => sum + d.tokens.length, 0) / N;
+    const k1 = 1.2;
+    const b = 0.75;
+
+    // IDF per query token
+    const df = new Map<string, number>();
+    for (const t of queryTokens) {
+      let count = 0;
+      for (const d of docs) {
+        if (d.tokens.includes(t)) count++;
+      }
+      df.set(t, count);
+    }
+
+    const idf = new Map<string, number>();
+    for (const t of queryTokens) {
+      const n = df.get(t) ?? 0;
+      idf.set(t, Math.log((N - n + 0.5) / (n + 0.5) + 1.0));
+    }
+
+    // Score
+    const results: ScoredMemory[] = [];
+    for (const { mem, tokens } of docs) {
+      const dl = tokens.length;
+      const tf = new Map<string, number>();
+      for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+
+      let score = 0;
+      for (const t of queryTokens) {
+        const f = tf.get(t) ?? 0;
+        if (f === 0) continue;
+        const num = f * (k1 + 1);
+        const denom = f + k1 * (1 - b + b * dl / avgdl);
+        score += (idf.get(t) ?? 0) * num / denom;
+      }
+
+      if (score > 0) {
+        results.push({
+          ...mem,
+          relevanceScore: score,
+          finalScore: score,
+        });
+      }
+    }
+
+    results.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    return results.slice(0, filters?.limit ?? 30);
+  }
+
+  // ------------------------------------------------------------------
   // Retention
   // ------------------------------------------------------------------
 

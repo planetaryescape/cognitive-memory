@@ -18,6 +18,22 @@ from typing import Optional
 
 from .types import Memory, MemoryCategory, CognitiveMemoryConfig
 
+VALID_MEMORY_TYPES = {"fact", "preference", "plan", "transient_state", "other"}
+
+
+def _parse_optional_datetime(value) -> Optional[datetime]:
+    """Parse an ISO datetime string, returning None on failure."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -35,6 +51,15 @@ For each memory, provide:
   - "episodic": specific one-time events with dates/times
   - "procedural": routines, habits, skills
 - importance: 0.0 to 1.0
+- memory_type: "fact" | "preference" | "plan" | "transient_state" | "other"
+  - "fact": verifiable statement about world or user (e.g. "Alex is 32 years old")
+  - "preference": user likes/dislikes (e.g. "Alex prefers dark roast coffee")
+  - "plan": future intention or scheduled event (e.g. "Alex has a meeting at 3pm tomorrow")
+  - "transient_state": temporary mood, location, current activity (e.g. "Alex is currently at the airport")
+  - "other": default if none of the above apply
+- valid_from: (optional) ISO date string when this becomes valid. Only for time-bounded memories.
+- valid_until: (optional) ISO date string when this expires. Use for plans and transient states.
+- source_turn_ids: (optional) array of turn numbers this was extracted from (e.g. [1, 3])
 
 CRITICAL RULES:
 1. NARRATE, don't interpret. Store WHAT HAPPENED, not what it means.
@@ -53,7 +78,7 @@ Conversation:
 {conversation}
 
 Respond with a JSON array only. No markdown, no preamble.
-Example: [{{"content": "Alex is a 32-year-old software engineer", "category": "core", "importance": 0.9}}, {{"content": "Alex is single", "category": "core", "importance": 0.7}}, {{"content": "Alex moved from Germany three years ago", "category": "core", "importance": 0.8}}, {{"content": "Sam has two dogs named Biscuit and Maple", "category": "core", "importance": 0.8}}, {{"content": "Alex finished reading The Great Gatsby in January 2024", "category": "episodic", "importance": 0.5}}, {{"content": "Sam ran a 5K for charity the weekend before March 10, 2024", "category": "episodic", "importance": 0.5}}]"""
+Example: [{{"content": "Alex is a 32-year-old software engineer", "category": "core", "importance": 0.9, "memory_type": "fact"}}, {{"content": "Alex prefers window seats on flights", "category": "semantic", "importance": 0.5, "memory_type": "preference"}}, {{"content": "Alex has a dentist appointment on March 15, 2024", "category": "episodic", "importance": 0.6, "memory_type": "plan", "valid_until": "2024-03-15T23:59:59"}}, {{"content": "Alex is currently feeling stressed about the deadline", "category": "episodic", "importance": 0.4, "memory_type": "transient_state"}}, {{"content": "Sam ran a 5K for charity the weekend before March 10, 2024", "category": "episodic", "importance": 0.5, "memory_type": "fact"}}]"""
 
 
 CONFLICT_PROMPT = """Does the new memory contradict or update an existing memory?
@@ -66,6 +91,16 @@ Respond with exactly one word: CONTRADICTION, UPDATE, OVERLAP, or NONE.
 - UPDATE: the new memory is a newer version of the same fact
 - OVERLAP: they cover similar ground but don't conflict
 - NONE: they are unrelated"""
+
+
+RERANK_PROMPT = """Given the query and a list of candidate memories, rerank them by relevance. Return a JSON array of indices (0-based) from most to least relevant. Only include indices of memories that are relevant to the query.
+
+Query: "{query}"
+
+Candidates:
+{candidates}
+
+Respond with a JSON array of indices only, e.g. [2, 0, 4, 1]. No explanation."""
 
 
 CONSOLIDATION_PROMPT = """Compress these related memories into a single concise summary that preserves all key facts.
@@ -173,6 +208,25 @@ class MemoryExtractor:
             importance = float(item.get("importance", 0.5))
             importance = max(0.0, min(1.0, importance))
 
+            # v6: Parse semantic type and validity
+            memory_type = item.get("memory_type", "other")
+            if memory_type not in VALID_MEMORY_TYPES:
+                memory_type = "other"
+
+            valid_from = _parse_optional_datetime(item.get("valid_from"))
+            valid_until = _parse_optional_datetime(item.get("valid_until"))
+            ttl_seconds = item.get("ttl_seconds")
+            if ttl_seconds is not None:
+                try:
+                    ttl_seconds = int(ttl_seconds)
+                except (ValueError, TypeError):
+                    ttl_seconds = None
+
+            source_turn_ids = item.get("source_turn_ids", [])
+            if not isinstance(source_turn_ids, list):
+                source_turn_ids = []
+            source_turn_ids = [str(t) for t in source_turn_ids]
+
             mem = Memory(
                 content=content,
                 category=category,
@@ -180,6 +234,11 @@ class MemoryExtractor:
                 stability=0.1 + (importance * 0.3),
                 created_at=timestamp,
                 last_accessed_at=timestamp,
+                memory_type=memory_type,
+                valid_from=valid_from,
+                valid_until=valid_until,
+                ttl_seconds=ttl_seconds,
+                source_turn_ids=source_turn_ids,
             )
             mem.session_ids.add(session_id)
             memories.append(mem)
@@ -243,3 +302,68 @@ class MemoryExtractor:
         numbered = "\n".join(f"{i+1}. {c}" for i, c in enumerate(contents))
         prompt = CONSOLIDATION_PROMPT.format(memories=numbered)
         return self._call_llm(prompt, max_tokens=500)
+
+    def _call_llm_with_usage(
+        self, prompt: str, max_tokens: int = 200, model: Optional[str] = None,
+    ) -> tuple[str, dict]:
+        """Call LLM and return (text, usage_dict) where usage_dict has prompt_tokens, completion_tokens."""
+        import time as _time
+        client = self._get_client()
+        used_model = model or self.config.extraction_model
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                resp = client.chat.completions.create(
+                    model=used_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,
+                    max_tokens=max_tokens,
+                )
+                text = resp.choices[0].message.content.strip()
+                usage = {}
+                if hasattr(resp, "usage") and resp.usage is not None:
+                    usage = {
+                        "prompt_tokens": getattr(resp.usage, "prompt_tokens", 0) or 0,
+                        "completion_tokens": getattr(resp.usage, "completion_tokens", 0) or 0,
+                    }
+                return text, usage
+            except Exception as e:
+                err_str = str(e).lower()
+                is_retryable = any(k in err_str for k in ("500", "server_error", "502", "503", "529", "rate_limit", "timeout", "connection"))
+                if attempt < max_retries - 1 and is_retryable:
+                    delay = min(60, 2 ** attempt * 2)
+                    _time.sleep(delay)
+                    continue
+                raise
+
+    def rerank_candidates(
+        self, query: str, candidates: list[str],
+    ) -> tuple[list[int], dict]:
+        """
+        Rerank candidates using LLM. Returns (reranked_indices, usage_dict).
+        usage_dict has prompt_tokens and completion_tokens.
+        """
+        numbered = "\n".join(f"[{i}] {c}" for i, c in enumerate(candidates))
+        prompt = RERANK_PROMPT.format(query=query, candidates=numbered)
+        model = self.config.rerank_model or self.config.extraction_model
+        text, usage = self._call_llm_with_usage(prompt, max_tokens=200, model=model)
+
+        try:
+            cleaned = text.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+                cleaned = re.sub(r"\s*```$", "", cleaned)
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, list):
+                # Validate indices
+                seen = set()
+                indices = []
+                for n in parsed:
+                    if isinstance(n, int) and 0 <= n < len(candidates) and n not in seen:
+                        indices.append(n)
+                        seen.add(n)
+                return indices, usage
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        return list(range(len(candidates))), usage

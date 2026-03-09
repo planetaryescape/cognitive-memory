@@ -6,7 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import type { Memory, MemoryCategory, ScoredMemory } from "../core/types";
+import type { Memory, MemoryCategory, SemanticType, ScoredMemory } from "../core/types";
 import { createDefaultMemory } from "../core/types";
 import { MemoryAdapter, type MemoryFilters } from "./base";
 
@@ -98,6 +98,11 @@ export function postgresSchemaSql(options?: {
     `  superseded_by text,`,
     `  is_stub boolean NOT NULL DEFAULT false,`,
     `  contradicted_by text,`,
+    `  semantic_type text NOT NULL DEFAULT 'other' CHECK (semantic_type IN ('fact','preference','plan','transient_state','other')),`,
+    `  valid_from bigint,`,
+    `  valid_until bigint,`,
+    `  ttl_seconds integer,`,
+    `  source_turn_ids text[] NOT NULL DEFAULT '{}',`,
     `  created_at bigint NOT NULL,`,
     `  updated_at bigint NOT NULL`,
     `);`,
@@ -185,9 +190,9 @@ export class PostgresAdapter extends MemoryAdapter {
 
     await this.db.query(
       `INSERT INTO ${this.mem} (
-        id, user_id, content, embedding, category, memory_type, importance, stability, access_count, last_accessed, retention, metadata, is_cold, cold_since, days_at_floor, is_superseded, superseded_by, is_stub, contradicted_by, created_at, updated_at
+        id, user_id, content, embedding, category, memory_type, importance, stability, access_count, last_accessed, retention, metadata, is_cold, cold_since, days_at_floor, is_superseded, superseded_by, is_stub, contradicted_by, semantic_type, valid_from, valid_until, ttl_seconds, source_turn_ids, created_at, updated_at
       ) VALUES (
-        $1, $2, $3, $4::vector, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21
+        $1, $2, $3, $4::vector, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24::text[], $25, $26
       )`,
       [
         id,
@@ -209,6 +214,11 @@ export class PostgresAdapter extends MemoryAdapter {
         memory.supersededBy ?? null,
         memory.isStub ?? false,
         memory.contradictedBy ?? null,
+        memory.semanticType ?? "other",
+        memory.validFrom ?? null,
+        memory.validUntil ?? null,
+        memory.ttlSeconds ?? null,
+        memory.sourceTurnIds ?? [],
         now,
         now,
       ],
@@ -302,6 +312,13 @@ export class PostgresAdapter extends MemoryAdapter {
     if (updates.isStub !== undefined) add("is_stub", updates.isStub);
     if (updates.contradictedBy !== undefined)
       add("contradicted_by", updates.contradictedBy);
+    if (updates.semanticType !== undefined)
+      add("semantic_type", updates.semanticType);
+    if (updates.validFrom !== undefined) add("valid_from", updates.validFrom);
+    if (updates.validUntil !== undefined) add("valid_until", updates.validUntil);
+    if (updates.ttlSeconds !== undefined) add("ttl_seconds", updates.ttlSeconds);
+    if (updates.sourceTurnIds !== undefined)
+      add("source_turn_ids", updates.sourceTurnIds, "::text[]");
     if (updates.createdAt !== undefined) add("created_at", updates.createdAt);
     if (updates.updatedAt !== undefined) add("updated_at", updates.updatedAt);
 
@@ -495,6 +512,50 @@ export class PostgresAdapter extends MemoryAdapter {
   }
 
   // ------------------------------------------------------------------
+  // Lexical search (BM25-like via Postgres full-text search)
+  // ------------------------------------------------------------------
+
+  async searchLexical(
+    query: string,
+    filters?: MemoryFilters,
+  ): Promise<ScoredMemory[]> {
+    const limit =
+      typeof filters?.limit === "number" ? Math.max(0, filters.limit) : 10;
+    const params: unknown[] = [query];
+
+    const { sql, params: whereParams } = this.buildWhere(filters ?? {}, 2);
+    params.push(...whereParams);
+
+    const res = await this.db.query(
+      [
+        `SELECT *, ts_rank_cd(to_tsvector('english', content), plainto_tsquery('english', $1)) AS text_score`,
+        `FROM ${this.mem}`,
+        `WHERE to_tsvector('english', content) @@ plainto_tsquery('english', $1)`,
+        sql ? `AND ${sql.replace(/^WHERE /, '')}` : '',
+        `ORDER BY text_score DESC`,
+        `LIMIT $${params.length + 1}`,
+      ].filter(Boolean).join(" "),
+      [...params, limit],
+    );
+
+    return res.rows
+      .map((r: Record<string, unknown>) => {
+        const memory = this.rowToMemory(r);
+        if (!memory) return null;
+        const relevanceScore =
+          typeof (r as any).text_score === "number"
+            ? ((r as any).text_score as number)
+            : 0;
+        return {
+          ...memory,
+          relevanceScore,
+          finalScore: relevanceScore * memory.retention,
+        } satisfies ScoredMemory;
+      })
+      .filter(Boolean) as ScoredMemory[];
+  }
+
+  // ------------------------------------------------------------------
   // Tiered storage
   // ------------------------------------------------------------------
 
@@ -675,6 +736,11 @@ export class PostgresAdapter extends MemoryAdapter {
       supersededBy: typeof row.superseded_by === "string" ? row.superseded_by : null,
       isStub: row.is_stub === true,
       contradictedBy: typeof row.contradicted_by === "string" ? row.contradicted_by : null,
+      semanticType: (typeof row.semantic_type === "string" ? row.semantic_type : "other") as SemanticType,
+      validFrom: toNumber(row.valid_from),
+      validUntil: toNumber(row.valid_until),
+      ttlSeconds: toNumber(row.ttl_seconds),
+      sourceTurnIds: Array.isArray(row.source_turn_ids) ? row.source_turn_ids.filter((s: unknown) => typeof s === "string") : [],
     });
   }
 }

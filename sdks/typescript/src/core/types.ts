@@ -21,6 +21,11 @@ export type MemoryCategory = "episodic" | "semantic" | "procedural" | "core";
 export type MemoryType = "episodic" | "semantic" | "procedural";
 
 /**
+ * Semantic type classification (orthogonal to MemoryCategory)
+ */
+export type SemanticType = "fact" | "preference" | "plan" | "transient_state" | "other";
+
+/**
  * Bidirectional association between two memories
  */
 export interface Association {
@@ -104,6 +109,21 @@ export interface Memory {
 
   /** ID of memory that contradicts this one */
   contradictedBy: string | null;
+
+  /** Semantic type classification (orthogonal to category) */
+  semanticType?: SemanticType;
+
+  /** Timestamp when this memory becomes valid */
+  validFrom?: number | null;
+
+  /** Timestamp when this memory expires */
+  validUntil?: number | null;
+
+  /** Time-to-live in seconds (alternative to validUntil) */
+  ttlSeconds?: number | null;
+
+  /** Turn IDs this memory was extracted from (for retrieval diagnostics) */
+  sourceTurnIds?: string[];
 }
 
 /**
@@ -129,6 +149,18 @@ export interface MemoryInput {
 
   /** Optional metadata */
   metadata?: Record<string, unknown>;
+
+  /** Semantic type classification */
+  semanticType?: SemanticType;
+
+  /** Timestamp when this memory becomes valid */
+  validFrom?: number | null;
+
+  /** Timestamp when this memory expires */
+  validUntil?: number | null;
+
+  /** Time-to-live in seconds */
+  ttlSeconds?: number | null;
 }
 
 /**
@@ -160,6 +192,9 @@ export interface RetrievalQuery {
 
   /** Enable deep recall (include superseded memories) */
   deepRecall?: boolean;
+
+  /** Include per-stage instrumentation trace in response */
+  trace?: boolean;
 }
 
 /**
@@ -172,6 +207,37 @@ export interface SearchResult {
   combinedScore: number;
   isAssociative: boolean;
   viaDeepRecall: boolean;
+  evidenceChains?: string[][];
+}
+
+/**
+ * Timing and stats for a single pipeline stage
+ */
+export interface StageTrace {
+  name: string;
+  wallMs: number;
+  candidateCount: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Per-query instrumentation trace
+ */
+export interface SearchTrace {
+  totalWallMs: number;
+  totalTokens: number;
+  stages: Record<string, StageTrace>;
+}
+
+/**
+ * Full search response with results, evidence chains, and optional trace
+ */
+export interface SearchResponse {
+  results: SearchResult[];
+  evidenceChains: string[][];
+  trace?: SearchTrace;
 }
 
 /**
@@ -277,6 +343,12 @@ export interface CognitiveMemoryConfig {
 
   // -- Decay --
 
+  /** Decay model: "exponential" (default) or "power" (power-law) */
+  decayModel?: "exponential" | "power";
+
+  /** Gamma exponent for power-law decay (default: 1/ln(2) ~= 1.4427) */
+  powerDecayGamma?: number;
+
   /** Default importance for new memories (0.0-1.0) */
   defaultImportance?: number;
 
@@ -365,6 +437,47 @@ export interface CognitiveMemoryConfig {
   /** Score penalty multiplier for superseded memories (default: 0.5) */
   deepRecallPenalty?: number;
 
+  // -- Hybrid retrieval (v6) --
+
+  /** Enable hybrid dense + BM25 lexical search (default: false) */
+  hybridSearch?: boolean;
+
+  /** Top-k for BM25 lexical search (default: 30) */
+  kSparse?: number;
+
+  // -- Validity filtering (v6) --
+
+  /** Filter expired plan/transient_state memories from results (default: true) */
+  filterExpiredTransients?: boolean;
+
+  /** Include expired memories when deep_recall is enabled (default: true) */
+  includeExpiredInDeepRecall?: boolean;
+
+  // -- LLM rerank (v6) --
+
+  /** Enable LLM reranking of top candidates (default: false) */
+  rerankEnabled?: boolean;
+
+  /** Number of top candidates to send to LLM for reranking (default: 10) */
+  kRerank?: number;
+
+  /** Model for reranking (defaults to extractionModel) */
+  rerankModel?: string;
+
+  // -- Graph expansion / bridge discovery (v6) --
+
+  /** Number of hops for graph expansion (0=disabled, 1 or 2) */
+  graphExpansionHops?: number;
+
+  /** Enable bridge path discovery between top results */
+  bridgeDiscovery?: boolean;
+
+  /** Maximum number of bridge paths to return */
+  maxBridgePaths?: number;
+
+  /** Minimum edge weight for graph traversal */
+  minBridgeEdgeWeight?: number;
+
   // -- Ingestion --
 
   /** Run maintenance (tick) during ingestion (default: true) */
@@ -393,6 +506,9 @@ export interface CognitiveMemoryConfig {
  */
 export interface ResolvedCognitiveMemoryConfig {
   userId: string;
+
+  decayModel: "exponential" | "power";
+  powerDecayGamma: number;
 
   defaultImportance: number;
   defaultStability: number;
@@ -427,6 +543,21 @@ export interface ResolvedCognitiveMemoryConfig {
 
   deepRecallPenalty: number;
 
+  hybridSearch: boolean;
+  kSparse: number;
+
+  filterExpiredTransients: boolean;
+  includeExpiredInDeepRecall: boolean;
+
+  rerankEnabled: boolean;
+  kRerank: number;
+  rerankModel: string | null;
+
+  graphExpansionHops: number;
+  bridgeDiscovery: boolean;
+  maxBridgePaths: number;
+  minBridgeEdgeWeight: number;
+
   runMaintenanceDuringIngestion: boolean;
 
   extractionModel: string;
@@ -440,6 +571,9 @@ export interface ResolvedCognitiveMemoryConfig {
  * Default config values matching Python SDK
  */
 export const DEFAULT_CONFIG: Omit<ResolvedCognitiveMemoryConfig, "userId"> = {
+  decayModel: "exponential",
+  powerDecayGamma: 1.4427,
+
   defaultImportance: 0.5,
   defaultStability: 0.3,
   minRetention: 0.2,
@@ -478,6 +612,21 @@ export const DEFAULT_CONFIG: Omit<ResolvedCognitiveMemoryConfig, "userId"> = {
 
   deepRecallPenalty: 0.5,
 
+  hybridSearch: false,
+  kSparse: 30,
+
+  filterExpiredTransients: true,
+  includeExpiredInDeepRecall: true,
+
+  rerankEnabled: false,
+  kRerank: 10,
+  rerankModel: null,
+
+  graphExpansionHops: 1,
+  bridgeDiscovery: false,
+  maxBridgePaths: 3,
+  minBridgeEdgeWeight: 0.3,
+
   runMaintenanceDuringIngestion: true,
 
   extractionModel: "gpt-4o-mini",
@@ -495,6 +644,8 @@ export function resolveConfig(
 ): ResolvedCognitiveMemoryConfig {
   return {
     userId: config.userId,
+    decayModel: config.decayModel ?? DEFAULT_CONFIG.decayModel,
+    powerDecayGamma: config.powerDecayGamma ?? DEFAULT_CONFIG.powerDecayGamma,
     defaultImportance: config.defaultImportance ?? DEFAULT_CONFIG.defaultImportance,
     defaultStability: config.defaultStability ?? DEFAULT_CONFIG.defaultStability,
     minRetention: config.minRetention ?? DEFAULT_CONFIG.minRetention,
@@ -522,6 +673,17 @@ export function resolveConfig(
     coldMigrationDays: config.coldMigrationDays ?? DEFAULT_CONFIG.coldMigrationDays,
     coldStorageTtlDays: config.coldStorageTtlDays ?? DEFAULT_CONFIG.coldStorageTtlDays,
     deepRecallPenalty: config.deepRecallPenalty ?? DEFAULT_CONFIG.deepRecallPenalty,
+    hybridSearch: config.hybridSearch ?? DEFAULT_CONFIG.hybridSearch,
+    kSparse: config.kSparse ?? DEFAULT_CONFIG.kSparse,
+    filterExpiredTransients: config.filterExpiredTransients ?? DEFAULT_CONFIG.filterExpiredTransients,
+    includeExpiredInDeepRecall: config.includeExpiredInDeepRecall ?? DEFAULT_CONFIG.includeExpiredInDeepRecall,
+    rerankEnabled: config.rerankEnabled ?? DEFAULT_CONFIG.rerankEnabled,
+    kRerank: config.kRerank ?? DEFAULT_CONFIG.kRerank,
+    rerankModel: config.rerankModel ?? DEFAULT_CONFIG.rerankModel,
+    graphExpansionHops: config.graphExpansionHops ?? DEFAULT_CONFIG.graphExpansionHops,
+    bridgeDiscovery: config.bridgeDiscovery ?? DEFAULT_CONFIG.bridgeDiscovery,
+    maxBridgePaths: config.maxBridgePaths ?? DEFAULT_CONFIG.maxBridgePaths,
+    minBridgeEdgeWeight: config.minBridgeEdgeWeight ?? DEFAULT_CONFIG.minBridgeEdgeWeight,
     runMaintenanceDuringIngestion: config.runMaintenanceDuringIngestion ?? DEFAULT_CONFIG.runMaintenanceDuringIngestion,
     extractionModel: config.extractionModel ?? DEFAULT_CONFIG.extractionModel,
     embeddingModel: config.embeddingModel ?? DEFAULT_CONFIG.embeddingModel,
@@ -572,6 +734,11 @@ export function createDefaultMemory(
     supersededBy: null,
     isStub: false,
     contradictedBy: null,
+    semanticType: "other",
+    validFrom: null,
+    validUntil: null,
+    ttlSeconds: null,
+    sourceTurnIds: [],
     ...partial,
   };
 }

@@ -7,6 +7,8 @@ Zero dependencies, great for testing and single-process use.
 
 from __future__ import annotations
 
+import math
+from collections import Counter
 from datetime import datetime
 from typing import Optional, Callable, TypeVar
 
@@ -92,6 +94,73 @@ class InMemoryAdapter(MemoryAdapter):
                 continue
             sim = cosine_similarity(query_embedding, mem.embedding)
             results.append((mem, sim))
+
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:top_k]
+
+    # ------------------------------------------------------------------
+    # Lexical search (BM25)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        return text.lower().split()
+
+    async def search_lexical(
+        self,
+        query: str,
+        top_k: int = 10,
+        include_superseded: bool = False,
+    ) -> list[tuple[Memory, float]]:
+        """BM25 lexical search over hot store."""
+        query_tokens = self._tokenize(query)
+        if not query_tokens:
+            return []
+
+        # Build corpus stats
+        docs: list[tuple[Memory, list[str]]] = []
+        for mem in self.hot.values():
+            if mem.is_stub:
+                continue
+            if mem.is_superseded and not include_superseded:
+                continue
+            docs.append((mem, self._tokenize(mem.content)))
+
+        if not docs:
+            return []
+
+        N = len(docs)
+        avgdl = sum(len(tokens) for _, tokens in docs) / N if N else 1.0
+        k1, b = 1.2, 0.75
+
+        # IDF per query token
+        df: dict[str, int] = Counter()
+        for _, tokens in docs:
+            unique = set(tokens)
+            for t in query_tokens:
+                if t in unique:
+                    df[t] += 1
+
+        idf: dict[str, float] = {}
+        for t in query_tokens:
+            n = df.get(t, 0)
+            idf[t] = math.log((N - n + 0.5) / (n + 0.5) + 1.0)
+
+        # Score each doc
+        results: list[tuple[Memory, float]] = []
+        for mem, tokens in docs:
+            tf = Counter(tokens)
+            dl = len(tokens)
+            score = 0.0
+            for t in query_tokens:
+                f = tf.get(t, 0)
+                if f == 0:
+                    continue
+                num = f * (k1 + 1)
+                denom = f + k1 * (1 - b + b * dl / avgdl)
+                score += idf.get(t, 0.0) * num / denom
+            if score > 0:
+                results.append((mem, score))
 
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_k]

@@ -311,6 +311,75 @@ export class JsonlFileAdapter extends MemoryAdapter {
     await this.append({ type: "link_delete", a, b, at: this.now() });
   }
 
+  // ------------------------------------------------------------------
+  // Lexical search (BM25)
+  // ------------------------------------------------------------------
+
+  override async searchLexical(
+    query: string,
+    filters?: MemoryFilters,
+  ): Promise<ScoredMemory[]> {
+    await this.ready();
+    const queryTokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (queryTokens.length === 0) return [];
+
+    let items = Array.from(this.hot.values());
+    if (!filters?.includeSuperseded)
+      items = items.filter((m) => !m.isSuperseded);
+    items = items.filter((m) => !m.isStub);
+    if (filters?.userId)
+      items = items.filter((m) => m.userId === filters.userId);
+
+    const N = items.length;
+    if (N === 0) return [];
+
+    const docs = items.map((m) => ({
+      mem: m,
+      tokens: m.content.toLowerCase().split(/\s+/).filter(Boolean),
+    }));
+
+    const avgdl = docs.reduce((sum, d) => sum + d.tokens.length, 0) / N;
+    const k1 = 1.2;
+    const b = 0.75;
+
+    const df = new Map<string, number>();
+    for (const t of queryTokens) {
+      let count = 0;
+      for (const d of docs) {
+        if (d.tokens.includes(t)) count++;
+      }
+      df.set(t, count);
+    }
+
+    const idf = new Map<string, number>();
+    for (const t of queryTokens) {
+      const n = df.get(t) ?? 0;
+      idf.set(t, Math.log((N - n + 0.5) / (n + 0.5) + 1.0));
+    }
+
+    const scored: ScoredMemory[] = [];
+    for (const d of docs) {
+      let score = 0;
+      for (const t of queryTokens) {
+        const tf = d.tokens.filter((tok) => tok === t).length;
+        if (tf === 0) continue;
+        const tfidf = idf.get(t) ?? 0;
+        score += tfidf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (d.tokens.length / avgdl))));
+      }
+      if (score > 0) {
+        scored.push({
+          ...d.mem,
+          relevanceScore: score,
+          finalScore: score * d.mem.retention,
+        });
+      }
+    }
+
+    return scored
+      .sort((a, b) => b.relevanceScore - a.relevanceScore)
+      .slice(0, filters?.limit ?? 10);
+  }
+
   async findFadingMemories(
     userId: string,
     maxRetention: number,

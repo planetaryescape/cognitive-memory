@@ -1,6 +1,6 @@
 // Adapters
-export type { ConvexAdapterFunctions, MemoryFilters } from "./adapters";
-export { ConvexAdapter, InMemoryAdapter, MemoryAdapter } from "./adapters";
+export type { ConvexAdapterFunctions, JsonlFileAdapterOptions, MemoryFilters, PostgresAdapterOptions } from "./adapters";
+export { ConvexAdapter, InMemoryAdapter, JsonlFileAdapter, MemoryAdapter, PostgresAdapter, postgresSchemaSql } from "./adapters";
 
 // Core types
 export type {
@@ -18,7 +18,11 @@ export type {
   ResolvedCognitiveMemoryConfig,
   RetrievalQuery,
   ScoredMemory,
+  SearchResponse,
   SearchResult,
+  SearchTrace,
+  SemanticType,
+  StageTrace,
 } from "./core";
 
 // Core classes and functions
@@ -43,11 +47,13 @@ export {
   CONFLICT_PROMPT,
   CONSOLIDATION_PROMPT,
   EXTRACTION_PROMPT,
+  RERANK_PROMPT,
   compressMemories,
   detectConflict,
   extractFromConversation,
+  rerankCandidates,
 } from "./core";
-export type { ConflictType, LLMProvider } from "./core";
+export type { ConflictType, LLMProvider, LLMUsage, RerankResult } from "./core";
 
 // Embedding providers
 export type {
