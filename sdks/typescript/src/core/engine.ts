@@ -12,6 +12,7 @@
 
 import type { MemoryAdapter } from "../adapters/base";
 import { cosineSimilarity } from "../utils/embeddings";
+import { greedyClusterBySimilarity } from "./clustering";
 import { calculateRetention, updateStability } from "./decay";
 import type { LLMProvider } from "./extraction";
 import { rerankCandidates } from "./extraction";
@@ -27,7 +28,7 @@ import type {
   SemanticType,
   StageTrace,
 } from "./types";
-import { getRetentionFloor } from "./types";
+import { getRetentionFloor, categoryToMemoryType } from "./types";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const EXPIRABLE_TYPES: Set<string> = new Set(["plan", "transient_state"]);
@@ -209,8 +210,8 @@ export class CognitiveEngine {
   }
 
   private syncGet(memoryId: string): Memory | null {
-    const adapter = this.adapter as any;
-    // InMemoryAdapter exposes hot/cold/stubs Maps
+    // InMemoryAdapter exposes hot/cold/stubs Maps for sync access
+    const adapter = this.adapter as { hot?: Map<string, Memory>; cold?: Map<string, Memory>; stubs?: Map<string, Memory> };
     if (adapter.hot) {
       return adapter.hot.get(memoryId) ??
         adapter.cold?.get(memoryId) ??
@@ -670,31 +671,7 @@ export class CognitiveEngine {
     for (const [category, mems] of byCategory) {
       if (mems.length < groupSize) continue;
 
-      // Simple greedy clustering by embedding similarity
-      const used = new Set<string>();
-      const groups: Memory[][] = [];
-
-      for (let i = 0; i < mems.length; i++) {
-        if (used.has(mems[i].id)) continue;
-        const group = [mems[i]];
-
-        for (let j = i + 1; j < mems.length; j++) {
-          if (used.has(mems[j].id)) continue;
-          if (mems[i].embedding.length > 0 && mems[j].embedding.length > 0) {
-            const sim = cosineSimilarity(mems[i].embedding, mems[j].embedding);
-            if (sim >= simThreshold) {
-              group.push(mems[j]);
-              if (group.length >= groupSize) break;
-            }
-          }
-        }
-
-        if (group.length >= groupSize) {
-          const finalGroup = group.slice(0, groupSize);
-          groups.push(finalGroup);
-          for (const m of finalGroup) used.add(m.id);
-        }
-      }
+      const groups = greedyClusterBySimilarity(mems, simThreshold, groupSize);
 
       // Create summaries for each group
       for (const group of groups) {
@@ -716,7 +693,7 @@ export class CognitiveEngine {
           content: summaryText,
           embedding: summaryEmbedding,
           category,
-          memoryType: category === "core" ? "semantic" : (category as any),
+          memoryType: categoryToMemoryType(category),
           importance: Math.max(...group.map((m) => m.importance)),
           stability:
             group.reduce((sum, m) => sum + m.stability, 0) / group.length,

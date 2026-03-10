@@ -7,7 +7,7 @@
 
 import type { MemoryAdapter, MemoryFilters } from "../adapters/base";
 import { cosineSimilarity } from "../utils/embeddings";
-import { extractTopics } from "../utils/scoring";
+import { greedyClusterBySimilarity } from "./clustering";
 import { updateStability } from "./decay";
 import { CognitiveEngine } from "./engine";
 import {
@@ -22,6 +22,7 @@ import type {
   ConsolidationResult,
   EmbeddingProvider,
   Memory,
+  MemoryCategory,
   MemoryInput,
   MemoryStats,
   ResolvedCognitiveMemoryConfig,
@@ -30,31 +31,11 @@ import type {
   SearchResponse,
   SearchResult,
 } from "./types";
-import { resolveConfig, getRetentionFloor } from "./types";
+import { resolveConfig, getRetentionFloor, categoryToMemoryType } from "./types";
+import { assertNonEmptyString, assertUnitInterval, assertNonNegativeInt } from "./validation";
+import { setTimeout as sleep } from "node:timers/promises";
 
-function assertNonEmptyString(field: string, value: string) {
-  if (value.trim().length === 0) {
-    throw new Error(`Invalid ${field}: ${value} (must be non-empty string)`);
-  }
-}
-
-function assertUnitInterval(field: string, value: number) {
-  if (Number.isNaN(value) || value < 0 || value > 1) {
-    throw new Error(`Invalid ${field}: ${value} (must be [0.0, 1.0])`);
-  }
-}
-
-function assertNonNegativeInt(field: string, value: number) {
-  if (!Number.isInteger(value) || value < 0) {
-    throw new Error(
-      `Invalid ${field}: ${value} (must be non-negative integer)`,
-    );
-  }
-}
-
-async function sleep(ms: number) {
-  await new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
+const SYNAPTIC_TAGGING_THRESHOLD = 0.4;
 
 /**
  * Main cognitive memory system
@@ -107,7 +88,7 @@ export class CognitiveMemory {
       content: input.content,
       embedding,
       category,
-      memoryType: category === "core" ? "semantic" : (category as any),
+      memoryType: categoryToMemoryType(category),
       importance: input.importance ?? this.config.defaultImportance,
       stability: input.stability ?? this.config.defaultStability,
       accessCount: 0,
@@ -228,7 +209,7 @@ export class CognitiveMemory {
               storedMemories[i].embedding,
               storedMemories[j].embedding,
             );
-            if (sim > 0.4) {
+            if (sim > SYNAPTIC_TAGGING_THRESHOLD) {
               await this.adapter.createOrStrengthenLink(
                 storedMemories[i].id,
                 storedMemories[j].id,
@@ -416,9 +397,9 @@ export class CognitiveMemory {
     }));
 
     // 2. Group by category, cluster by similarity
-    const byCategory = new Map<string, Memory[]>();
+    const byCategory = new Map<MemoryCategory, Memory[]>();
     for (const memory of fading) {
-      const cat = memory.category ?? "semantic";
+      const cat: MemoryCategory = memory.category ?? "semantic";
       if (!byCategory.has(cat)) byCategory.set(cat, []);
       byCategory.get(cat)!.push(memory);
     }
@@ -426,38 +407,18 @@ export class CognitiveMemory {
     for (const [category, memories] of byCategory) {
       if (memories.length < this.config.consolidationGroupSize) continue;
 
-      // Greedy clustering by embedding similarity
-      const used = new Set<string>();
-      const groups: Memory[][] = [];
-
-      for (let i = 0; i < memories.length; i++) {
-        if (used.has(memories[i].id)) continue;
-        const group = [memories[i]];
-
-        for (let j = i + 1; j < memories.length; j++) {
-          if (used.has(memories[j].id)) continue;
-          if (memories[i].embedding.length > 0 && memories[j].embedding.length > 0) {
-            const sim = cosineSimilarity(memories[i].embedding, memories[j].embedding);
-            if (sim >= this.config.consolidationSimilarityThreshold) {
-              group.push(memories[j]);
-              if (group.length >= this.config.consolidationGroupSize) break;
-            }
-          }
-        }
-
-        if (group.length >= this.config.consolidationGroupSize) {
-          const finalGroup = group.slice(0, this.config.consolidationGroupSize);
-          groups.push(finalGroup);
-          for (const m of finalGroup) used.add(m.id);
-        }
-      }
+      const groups = greedyClusterBySimilarity(
+        memories,
+        this.config.consolidationSimilarityThreshold,
+        this.config.consolidationGroupSize,
+      );
 
       for (const group of groups) {
         const summary = this.summarizeMemories(group);
 
         const summaryId = await this.store({
           content: summary,
-          category: category as any,
+          category,
           importance: Math.max(...group.map((m) => m.importance)),
           metadata: {
             compressed: true,

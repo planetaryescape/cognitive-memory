@@ -11,6 +11,7 @@ import type {
   ResolvedCognitiveMemoryConfig,
 } from "./types";
 import { DEFAULT_CONFIG, getBaseDecayRate, getRetentionFloor } from "./types";
+import { assertUnitInterval } from "./validation";
 
 /**
  * Base decay rates (in days) for different memory categories
@@ -30,12 +31,6 @@ export const DECAY_FLOORS = {
   core: 0.60,
   regular: 0.02,
 } as const;
-
-function assertUnitInterval(field: string, value: number) {
-  if (Number.isNaN(value) || value < 0 || value > 1) {
-    throw new Error(`Invalid ${field}: ${value} (must be [0.0, 1.0])`);
-  }
-}
 
 /**
  * Calculate current retention level (0.0-1.0) for a memory
