@@ -34,14 +34,22 @@
     "prepublishOnly": "bun run build"
   },
   "keywords": [
-    "ai", "memory", "cognitive", "ebbinghaus", "spaced-repetition",
-    "forgetting-curve", "associative-memory", "llm", "chatbot", "agents"
+    "ai",
+    "memory",
+    "cognitive",
+    "ebbinghaus",
+    "spaced-repetition",
+    "forgetting-curve",
+    "associative-memory",
+    "llm",
+    "chatbot",
+    "agents"
   ],
   "author": "Bhekani Khumalo",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bhekanik/cognitive-memory",
+    "url": "git+https://github.com/bhekanik/cognitive-memory.git",
     "directory": "sdks/typescript"
   },
   "homepage": "https://bhekanik.github.io/cognitive-memory",
@@ -50,8 +58,12 @@
     "pg": ">=8.0.0"
   },
   "peerDependenciesMeta": {
-    "convex": { "optional": true },
-    "pg": { "optional": true }
+    "convex": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22.19.0",

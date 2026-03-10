@@ -18,41 +18,33 @@ The SDK is ESM-only and requires Node.js 18+ or Bun.
 ## Basic usage
 
 ```typescript
-import { CognitiveMemory, InMemoryAdapter } from "cognitive-memory";
-import type { EmbeddingProvider } from "cognitive-memory";
-
-// You need an embedding provider — bring your own or use OpenAI:
-const embeddingProvider: EmbeddingProvider = {
-  async embed(text: string): Promise<number[]> {
-    const response = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: text,
-    });
-    return response.data[0].embedding;
-  },
-};
+import {
+  CognitiveMemory,
+  InMemoryAdapter,
+  HashEmbeddingProvider,
+} from "cognitive-memory";
 
 const mem = new CognitiveMemory({
   adapter: new InMemoryAdapter(),
-  embeddingProvider,
+  embeddingProvider: new HashEmbeddingProvider(), // or: new OpenAIEmbeddingProvider({ apiKey })
   userId: "user-123",
 });
 
 // Store a memory
 const id = await mem.store({
   content: "User is allergic to shellfish",
-  memoryType: "semantic",
+  category: "semantic",
   importance: 0.9,
 });
 
-// Retrieve memories
-const results = await mem.retrieve({
+// Search memories
+const { results } = await mem.search({
   query: "what food allergies does the user have?",
   limit: 5,
 });
 
 for (const result of results) {
-  console.log(`${result.content} (score=${result.finalScore.toFixed(3)})`);
+  console.log(`${result.memory.content} (score=${result.combinedScore.toFixed(3)})`);
 }
 ```
 
@@ -61,22 +53,22 @@ for (const result of results) {
 When storing a memory, specify the type to control its decay behavior:
 
 ```typescript
-// Episodic: specific events, 30-day base decay
+// Episodic: specific events, 45-day base decay
 await mem.store({
   content: "User went hiking at Mount Rainier on March 12",
-  memoryType: "episodic",
+  category: "episodic",
 });
 
-// Semantic: lasting facts, 90-day base decay
+// Semantic: lasting facts, 120-day base decay
 await mem.store({
   content: "User prefers dark roast coffee",
-  memoryType: "semantic",
+  category: "semantic",
 });
 
 // Procedural: skills and routines, never decays
 await mem.store({
   content: "User runs every morning at 6am",
-  memoryType: "procedural",
+  category: "procedural",
 });
 ```
 
@@ -145,7 +137,7 @@ Consolidation does four things:
 ```typescript
 import { InMemoryAdapter } from "cognitive-memory";
 import { PostgresAdapter } from "cognitive-memory/adapters/postgres";
-import { JsonlAdapter } from "cognitive-memory/adapters/jsonl";
+import { JsonlFileAdapter } from "cognitive-memory/adapters/jsonl";
 
 // In-memory (testing, prototyping)
 const mem1 = new CognitiveMemory({
@@ -163,7 +155,7 @@ const mem2 = new CognitiveMemory({
 
 // JSONL file (local development, debugging)
 const mem3 = new CognitiveMemory({
-  adapter: new JsonlAdapter({ filePath: "./memories.jsonl" }),
+  adapter: new JsonlFileAdapter({ filePath: "./memories.jsonl" }),
   embeddingProvider,
   userId: "user-1",
 });

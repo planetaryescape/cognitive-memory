@@ -33,8 +33,8 @@ async def main():
     )
 
     # Search
-    results = await mem.search("what allergies does the user have?")
-    for r in results:
+    response = await mem.search("what allergies does the user have?")
+    for r in response.results:
         print(f"{r.memory.content}")
         print(f"  relevance={r.relevance_score:.3f}")
         print(f"  retention={r.retention_score:.3f}")
@@ -52,7 +52,8 @@ from cognitive_memory import SyncCognitiveMemory
 
 mem = SyncCognitiveMemory()
 mem.add("User prefers dark mode", category="semantic", importance=0.4)
-results = mem.search("UI preferences")
+response = mem.search("UI preferences")
+# response.results is a list of SearchResult objects
 ```
 
 ## Extract from conversations
@@ -91,8 +92,8 @@ By default, `CognitiveMemory` uses the `InMemoryAdapter` (data lives in Python d
 
 ```python
 from cognitive_memory import CognitiveMemory
-# from cognitive_memory.adapters.sqlite import SQLiteAdapter  # coming soon
-# from cognitive_memory.adapters.postgres import PostgresAdapter  # coming soon
+# from cognitive_memory.adapters.sqlite import SQLiteAdapter  # not yet implemented
+# from cognitive_memory.adapters.postgres import PostgresAdapter  # not yet implemented
 
 # Default: in-memory (great for testing)
 mem = CognitiveMemory()
