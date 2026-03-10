@@ -42,7 +42,7 @@ class OpenAIEmbeddings(EmbeddingProvider):
     def _get_client(self):
         if self._client is None:
             from openai import OpenAI
-            self._client = OpenAI()
+            self._client = OpenAI(timeout=120.0)
         return self._client
 
     @property

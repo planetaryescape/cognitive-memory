@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from itertools import combinations
 from typing import Optional, Literal
 
 from .types import (
@@ -22,7 +23,7 @@ from .types import (
 )
 from .adapters.base import MemoryAdapter
 from .adapters.memory import InMemoryAdapter
-from .engine import CognitiveEngine
+from .engine import CognitiveEngine, _ensure_bidirectional_association
 from .extraction import MemoryExtractor
 from .embeddings import (
     EmbeddingProvider,
@@ -32,6 +33,11 @@ from .embeddings import (
 )
 
 logger = logging.getLogger(__name__)
+
+CONFLICT_SIMILARITY_THRESHOLD = 0.6
+STABILITY_REINFORCEMENT_THRESHOLD = 0.75
+INGESTION_ASSOCIATION_THRESHOLD = 0.4
+INGESTION_ASSOCIATION_BASE_WEIGHT = 0.2
 
 
 class CognitiveMemory:
@@ -169,7 +175,7 @@ class CognitiveMemory:
                     if mem.embedding is not None:
                         similar = await self._adapter.search_similar(mem.embedding, top_k=3)
                         for existing_mem, sim in similar:
-                            if sim > 0.75 and existing_mem.id != mem.id:
+                            if sim > STABILITY_REINFORCEMENT_THRESHOLD and existing_mem.id != mem.id:
                                 existing_mem.stability = min(1.0, existing_mem.stability + 0.05)
                     await self._adapter.create(mem)
                     stored.append(mem)
@@ -190,34 +196,14 @@ class CognitiveMemory:
         if not stored:
             return []
 
-        # Synaptic tagging: create associations between memories from the
-        # same session. In neuroscience, memories encoded close together in
-        # time are linked so recalling one activates the others. We gate by
-        # semantic similarity to avoid noise — only link memories that share
-        # some topical overlap (sim > 0.4).
-        from .embeddings import cosine_similarity as _cos_sim
-        from .types import Association as _Assoc
-        ingestion_assoc_threshold = 0.4
-        ingestion_assoc_weight = 0.2
-        for i in range(len(stored)):
-            if stored[i].embedding is None:
+        # Synaptic tagging: link co-ingested memories gated by similarity
+        for mem_a, mem_b in combinations(stored, 2):
+            if mem_a.embedding is None or mem_b.embedding is None:
                 continue
-            for j in range(i + 1, len(stored)):
-                if stored[j].embedding is None:
-                    continue
-                sim = _cos_sim(stored[i].embedding, stored[j].embedding)
-                if sim >= ingestion_assoc_threshold:
-                    weight = min(0.5, ingestion_assoc_weight + (sim - ingestion_assoc_threshold) * 0.5)
-                    if stored[j].id not in stored[i].associations:
-                        stored[i].associations[stored[j].id] = _Assoc(
-                            target_id=stored[j].id, weight=weight,
-                            created_at=now, last_co_retrieval=now,
-                        )
-                    if stored[i].id not in stored[j].associations:
-                        stored[j].associations[stored[i].id] = _Assoc(
-                            target_id=stored[i].id, weight=weight,
-                            created_at=now, last_co_retrieval=now,
-                        )
+            sim = cosine_similarity(mem_a.embedding, mem_b.embedding)
+            if sim >= INGESTION_ASSOCIATION_THRESHOLD:
+                weight = min(0.5, INGESTION_ASSOCIATION_BASE_WEIGHT + (sim - INGESTION_ASSOCIATION_THRESHOLD) * 0.5)
+                _ensure_bidirectional_association(mem_a, mem_b, weight, now)
 
         # Periodic maintenance (skip during batch benchmarks)
         if run_tick and self.config.run_maintenance_during_ingestion:
@@ -290,7 +276,7 @@ class CognitiveMemory:
             if existing.embedding is None:
                 continue
             sim = cosine_similarity(new_memory.embedding, existing.embedding)
-            if sim < 0.6:  # only check high-similarity pairs
+            if sim < CONFLICT_SIMILARITY_THRESHOLD:
                 continue
 
             conflict_type = self._extractor.detect_conflict(new_memory, existing)

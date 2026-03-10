@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 import time as _time
 from datetime import datetime, timedelta
+from itertools import combinations
 from typing import Optional
 
 from .types import (
@@ -31,6 +32,27 @@ from .adapters.base import MemoryAdapter
 from .embeddings import EmbeddingProvider, cosine_similarity
 
 _EXPIRABLE_TYPES = {"plan", "transient_state"}
+
+
+def _ensure_bidirectional_association(
+    mem_a: Memory,
+    mem_b: Memory,
+    weight: float,
+    now: datetime,
+    *,
+    strengthen: bool = False,
+) -> None:
+    """Create or strengthen a bidirectional association between two memories."""
+    for src, tgt in ((mem_a, mem_b), (mem_b, mem_a)):
+        if tgt.id not in src.associations:
+            src.associations[tgt.id] = Association(
+                target_id=tgt.id, weight=0.0 if strengthen else weight,
+                created_at=now, last_co_retrieval=now,
+            )
+        if strengthen:
+            assoc = src.associations[tgt.id]
+            assoc.weight = min(1.0, assoc.weight + weight)
+            assoc.last_co_retrieval = now
 
 
 class CognitiveEngine:
@@ -184,22 +206,7 @@ class CognitiveEngine:
         Bidirectional.
         """
         amount = self.config.association_strengthen_amount
-
-        if mem_b.id not in mem_a.associations:
-            mem_a.associations[mem_b.id] = Association(
-                target_id=mem_b.id, weight=0.0, created_at=now,
-            )
-        assoc_ab = mem_a.associations[mem_b.id]
-        assoc_ab.weight = min(1.0, assoc_ab.weight + amount)
-        assoc_ab.last_co_retrieval = now
-
-        if mem_a.id not in mem_b.associations:
-            mem_b.associations[mem_a.id] = Association(
-                target_id=mem_a.id, weight=0.0, created_at=now,
-            )
-        assoc_ba = mem_b.associations[mem_a.id]
-        assoc_ba.weight = min(1.0, assoc_ba.weight + amount)
-        assoc_ba.last_co_retrieval = now
+        _ensure_bidirectional_association(mem_a, mem_b, amount, now, strengthen=True)
 
     def decay_association(self, assoc: Association, now: datetime) -> float:
         """
@@ -231,7 +238,7 @@ class CognitiveEngine:
         results = []
         threshold = self.config.association_retrieval_threshold
 
-        for assoc in list(memory.associations.values()):
+        for assoc in memory.associations.values():
             weight = self.decay_association(assoc, now)
             if weight < threshold:
                 continue
@@ -275,7 +282,7 @@ class CognitiveEngine:
         for _hop in range(max_hops):
             next_frontier: list[Memory] = []
             for mem in frontier:
-                for assoc in list(mem.associations.values()):
+                for assoc in mem.associations.values():
                     weight = self.decay_association(assoc, now)
                     if weight < self.config.min_bridge_edge_weight:
                         continue
@@ -305,15 +312,12 @@ class CognitiveEngine:
         chains: list[list[str]] = []
         anchor_ids = [m.id for m in anchors[:3]]  # top-3
 
-        for i in range(len(anchor_ids)):
-            for j in range(i + 1, len(anchor_ids)):
-                path = self._bfs_path(
-                    anchor_ids[i], anchor_ids[j], now, max_depth=3,
-                )
-                if path and len(path) > 2:  # non-trivial path
-                    chains.append(path)
-                    if len(chains) >= self.config.max_bridge_paths:
-                        return chains
+        for a_id, b_id in combinations(anchor_ids, 2):
+            path = self._bfs_path(a_id, b_id, now, max_depth=3)
+            if path and len(path) > 2:  # non-trivial path
+                chains.append(path)
+                if len(chains) >= self.config.max_bridge_paths:
+                    return chains
         return chains
 
     def _bfs_path(
@@ -596,9 +600,8 @@ class CognitiveEngine:
 
         # Step 6: Strengthen associations between co-retrieved memories
         all_direct_mems = [r.memory for r in direct_results]
-        for i in range(len(all_direct_mems)):
-            for j in range(i + 1, len(all_direct_mems)):
-                self.strengthen_association(all_direct_mems[i], all_direct_mems[j], now)
+        for mem_a, mem_b in combinations(all_direct_mems, 2):
+            self.strengthen_association(mem_a, mem_b, now)
 
         # Combine and sort
         all_results = direct_results + associative_results
