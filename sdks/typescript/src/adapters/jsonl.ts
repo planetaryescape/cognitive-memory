@@ -145,8 +145,6 @@ export class JsonlFileAdapter extends MemoryAdapter {
       items = items.filter((m) => m.userId === filters.userId);
     if (filters.categories)
       items = items.filter((m) => filters.categories!.includes(m.category));
-    if (filters.memoryTypes)
-      items = items.filter((m) => filters.memoryTypes!.includes(m.memoryType));
     if (filters.minRetention !== undefined)
       items = items.filter((m) => m.retention >= filters.minRetention!);
     if (filters.minImportance !== undefined)
@@ -209,8 +207,6 @@ export class JsonlFileAdapter extends MemoryAdapter {
       items = items.filter((m) => m.userId === filters.userId);
     if (filters?.categories)
       items = items.filter((m) => filters.categories!.includes(m.category));
-    if (filters?.memoryTypes)
-      items = items.filter((m) => filters.memoryTypes!.includes(m.memoryType));
     if (filters?.minRetention !== undefined)
       items = items.filter((m) => m.retention >= filters.minRetention!);
     if (!filters?.includeSuperseded)

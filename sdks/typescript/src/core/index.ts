@@ -38,7 +38,6 @@ export type {
   MemoryInput,
   MemoryLink,
   MemoryStats,
-  MemoryType,
   ResolvedCognitiveMemoryConfig,
   RetrievalQuery,
   ScoredMemory,

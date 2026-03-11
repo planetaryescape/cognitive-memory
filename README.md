@@ -29,35 +29,41 @@ npm install cognitive-memory
 ### Python
 
 ```python
-from cognitive_memory import CognitiveMemory
+from cognitive_memory import SyncCognitiveMemory, MemoryCategory
 
-memory = CognitiveMemory()
+mem = SyncCognitiveMemory(embedder="hash")
 
 # Store a memory
-await memory.add("User prefers dark mode and compact layouts", user_id="u1")
+mem.add("User prefers dark mode and compact layouts", category=MemoryCategory.SEMANTIC, importance=0.7)
 
-# Retrieve relevant memories
-results = await memory.search("What are the user's UI preferences?", user_id="u1")
-for mem in results:
-    print(mem.content, f"(retention: {mem.retention:.2f})")
+# Search memories
+response = mem.search("What are the user's UI preferences?")
+for r in response.results:
+    print(r.memory.content, f"(score: {r.combined_score:.2f})")
 ```
 
 ### TypeScript
 
 ```typescript
-import { CognitiveMemory } from "cognitive-memory";
+import { CognitiveMemory, InMemoryAdapter, HashEmbeddingProvider } from "cognitive-memory";
 
-const memory = new CognitiveMemory();
+const mem = new CognitiveMemory({
+  adapter: new InMemoryAdapter(),
+  embeddingProvider: new HashEmbeddingProvider(),
+  userId: "user-1",
+});
 
 // Store a memory
-await memory.add("User prefers dark mode and compact layouts", { userId: "u1" });
-
-// Retrieve relevant memories
-const results = await memory.search("What are the user's UI preferences?", {
-  userId: "u1",
+await mem.store({
+  content: "User prefers dark mode and compact layouts",
+  category: "semantic",
+  importance: 0.7,
 });
-for (const mem of results) {
-  console.log(mem.content, `(retention: ${mem.retention.toFixed(2)})`);
+
+// Search memories
+const { results } = await mem.search({ query: "What are the user's UI preferences?" });
+for (const r of results) {
+  console.log(r.memory.content, `(score: ${r.combinedScore.toFixed(2)})`);
 }
 ```
 

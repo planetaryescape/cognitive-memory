@@ -12,6 +12,7 @@
 
 import type { MemoryAdapter } from "../adapters/base";
 import { cosineSimilarity } from "../utils/embeddings";
+import { greedyClusterBySimilarity } from "./clustering";
 import { calculateRetention, updateStability } from "./decay";
 import type { LLMProvider } from "./extraction";
 import { rerankCandidates } from "./extraction";
@@ -134,7 +135,6 @@ export class CognitiveEngine {
       memory.sessionIds.length >= this.config.coreSessionThreshold
     ) {
       memory.category = "core";
-      memory.memoryType = "semantic"; // core maps to semantic for backward compat
       return true;
     }
     return false;
@@ -209,8 +209,8 @@ export class CognitiveEngine {
   }
 
   private syncGet(memoryId: string): Memory | null {
-    const adapter = this.adapter as any;
-    // InMemoryAdapter exposes hot/cold/stubs Maps
+    // InMemoryAdapter exposes hot/cold/stubs Maps for sync access
+    const adapter = this.adapter as { hot?: Map<string, Memory>; cold?: Map<string, Memory>; stubs?: Map<string, Memory> };
     if (adapter.hot) {
       return adapter.hot.get(memoryId) ??
         adapter.cold?.get(memoryId) ??
@@ -541,8 +541,10 @@ export class CognitiveEngine {
     }
 
     // Step 4: Apply boosts
+    const modifiedIds = new Set<string>();
     for (const result of directResults) {
       this.applyDirectBoost(result.memory, now, sessionId);
+      modifiedIds.add(result.memory.id);
       if (result.memory.isCold) {
         await this.adapter.migrateToHot(result.memory.id);
       }
@@ -550,6 +552,7 @@ export class CognitiveEngine {
 
     for (const result of associativeResults) {
       this.applyAssociativeBoost(result.memory, now, sessionId);
+      modifiedIds.add(result.memory.id);
       if (result.memory.isCold) {
         await this.adapter.migrateToHot(result.memory.id);
       }
@@ -566,6 +569,20 @@ export class CognitiveEngine {
       for (let j = i + 1; j < directMems.length; j++) {
         this.strengthenAssociation(directMems[i], directMems[j], now);
       }
+    }
+
+    // Persist all boost/promotion/association mutations
+    const allModified = [...directResults, ...associativeResults]
+      .filter((r) => modifiedIds.has(r.memory.id));
+    for (const r of allModified) {
+      await this.adapter.updateMemory(r.memory.id, {
+        stability: r.memory.stability,
+        accessCount: r.memory.accessCount,
+        lastAccessed: r.memory.lastAccessed,
+        sessionIds: r.memory.sessionIds,
+        category: r.memory.category,
+        associations: r.memory.associations,
+      });
     }
 
     // Combine and sort
@@ -612,6 +629,9 @@ export class CognitiveEngine {
       } else {
         mem.daysAtFloor = 0;
       }
+
+      // Persist daysAtFloor counter
+      await this.adapter.updateMemory(mem.id, { daysAtFloor: mem.daysAtFloor });
 
       if (mem.daysAtFloor >= thresholdDays) {
         await this.adapter.migrateToCold(mem.id, now);
@@ -670,31 +690,7 @@ export class CognitiveEngine {
     for (const [category, mems] of byCategory) {
       if (mems.length < groupSize) continue;
 
-      // Simple greedy clustering by embedding similarity
-      const used = new Set<string>();
-      const groups: Memory[][] = [];
-
-      for (let i = 0; i < mems.length; i++) {
-        if (used.has(mems[i].id)) continue;
-        const group = [mems[i]];
-
-        for (let j = i + 1; j < mems.length; j++) {
-          if (used.has(mems[j].id)) continue;
-          if (mems[i].embedding.length > 0 && mems[j].embedding.length > 0) {
-            const sim = cosineSimilarity(mems[i].embedding, mems[j].embedding);
-            if (sim >= simThreshold) {
-              group.push(mems[j]);
-              if (group.length >= groupSize) break;
-            }
-          }
-        }
-
-        if (group.length >= groupSize) {
-          const finalGroup = group.slice(0, groupSize);
-          groups.push(finalGroup);
-          for (const m of finalGroup) used.add(m.id);
-        }
-      }
+      const groups = greedyClusterBySimilarity(mems, simThreshold, groupSize);
 
       // Create summaries for each group
       for (const group of groups) {
@@ -716,7 +712,6 @@ export class CognitiveEngine {
           content: summaryText,
           embedding: summaryEmbedding,
           category,
-          memoryType: category === "core" ? "semantic" : (category as any),
           importance: Math.max(...group.map((m) => m.importance)),
           stability:
             group.reduce((sum, m) => sum + m.stability, 0) / group.length,

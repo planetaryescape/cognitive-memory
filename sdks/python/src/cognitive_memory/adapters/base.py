@@ -229,7 +229,3 @@ class MemoryAdapter(ABC):
     async def clear(self) -> None:
         """Clear all data."""
         ...
-
-
-# Avoid circular import — just for type hints
-from datetime import datetime  # noqa: E402

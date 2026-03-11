@@ -125,30 +125,12 @@ class MemoryExtractor:
     def _get_client(self):
         if self._client is None:
             from openai import OpenAI
-            self._client = OpenAI()
+            self._client = OpenAI(timeout=120.0)
         return self._client
 
     def _call_llm(self, prompt: str, max_tokens: int = 1000) -> str:
-        import time as _time
-        client = self._get_client()
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                resp = client.chat.completions.create(
-                    model=self.config.extraction_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
-                    max_tokens=max_tokens,
-                )
-                return resp.choices[0].message.content.strip()
-            except Exception as e:
-                err_str = str(e).lower()
-                is_retryable = any(k in err_str for k in ("500", "server_error", "502", "503", "529", "rate_limit", "timeout", "connection"))
-                if attempt < max_retries - 1 and is_retryable:
-                    delay = min(60, 2 ** attempt * 2)
-                    _time.sleep(delay)
-                    continue
-                raise
+        text, _ = self._call_llm_with_usage(prompt, max_tokens=max_tokens)
+        return text
 
     def extract_from_conversation(
         self,
@@ -174,7 +156,6 @@ class MemoryExtractor:
         return self._build_memories(items, session_id, timestamp)
 
     def _parse_extraction_response(self, raw: str, fallback_text: str) -> list[dict]:
-
         """Parse LLM extraction response into list of dicts."""
         try:
             cleaned = raw.strip()

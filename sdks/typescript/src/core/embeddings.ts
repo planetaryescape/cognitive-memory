@@ -6,6 +6,7 @@
  * - HashEmbeddingProvider: Deterministic hash-based embeddings for testing
  */
 
+import { setTimeout as sleep } from "node:timers/promises";
 import type { EmbeddingProvider } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -75,9 +76,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       } catch (err) {
         lastError = err;
         if (attempt < 2) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.min(2000, 250 * 2 ** attempt)),
-          );
+          await sleep(Math.min(2000, 250 * 2 ** attempt));
         }
       }
     }

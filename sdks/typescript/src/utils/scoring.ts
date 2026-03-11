@@ -5,7 +5,7 @@
  * Can be extended with LLM-based scoring.
  */
 
-import type { MemoryType } from "../core/types";
+import type { MemoryCategory } from "../core/types";
 
 /**
  * Score importance based on heuristics
@@ -84,7 +84,7 @@ export function scoreImportance(text: string): number {
  * @param text Memory content
  * @returns Memory type
  */
-export function categorizeMemoryType(text: string): MemoryType {
+export function categorizeMemoryType(text: string): MemoryCategory {
   const lowerText = text.toLowerCase();
 
   // Procedural indicators

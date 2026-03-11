@@ -114,14 +114,4 @@ describe("decay", () => {
     expect(retention).toBe(1.0);
   });
 
-  test("backward compat: memoryType field still works", () => {
-    const retention = calculateRetention({
-      stability: 0.5,
-      importance: 0.5,
-      lastAccessed: Date.now() - 10_000_000_000,
-      category: "procedural",
-      memoryType: "procedural",
-    });
-    expect(retention).toBe(1.0);
-  });
 });

@@ -91,7 +91,6 @@ export class ConvexAdapter extends MemoryAdapter {
       userId: memory.userId,
       content: memory.content,
       embedding: memory.embedding,
-      memoryType: memory.memoryType,
       category: memory.category,
       stability: memory.stability,
       accessCount: memory.accessCount,
@@ -144,8 +143,6 @@ export class ConvexAdapter extends MemoryAdapter {
 
     if (updates.content !== undefined) payload.content = updates.content;
     if (updates.embedding !== undefined) payload.embedding = updates.embedding;
-    if (updates.memoryType !== undefined)
-      payload.memoryType = updates.memoryType;
     if (updates.category !== undefined) payload.category = updates.category;
     if (updates.stability !== undefined) payload.stability = updates.stability;
     if (updates.accessCount !== undefined)
@@ -174,7 +171,6 @@ export class ConvexAdapter extends MemoryAdapter {
     const raw = await this.client.action(this.fns.cognitiveVectorSearch, {
       embedding,
       userId: filters?.userId,
-      memoryTypes: filters?.memoryTypes,
       categories: filters?.categories,
       minRetention: filters?.minRetention,
       limit: filters?.limit ?? 5,

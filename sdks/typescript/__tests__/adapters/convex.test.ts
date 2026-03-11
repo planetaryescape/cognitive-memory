@@ -55,7 +55,7 @@ describe("ConvexAdapter", () => {
       userId: "u1",
       content: "x",
       embedding: [0, 1],
-      memoryType: "semantic",
+
       importance: 0.7,
       stability: 0.3,
       accessCount: 0,
@@ -76,7 +76,7 @@ describe("ConvexAdapter", () => {
       content: "x",
       embedding: [0, 1],
       metadata: { category: "identity", importance: 8 },
-      memoryType: "semantic",
+
       stability: 0.3,
       accessCount: 0,
       lastAccessed: 1,
@@ -121,7 +121,7 @@ describe("ConvexAdapter", () => {
           content: "x",
           embedding: [0, 1],
           metadata: { category: "identity", importance: 5 },
-          memoryType: "semantic",
+    
           stability: 0.3,
           accessCount: 0,
           lastAccessed: 1,
@@ -205,7 +205,7 @@ describe("ConvexAdapter", () => {
           content: "x",
           embedding: [0, 1],
           metadata: { category: "identity", importance: 5 },
-          memoryType: "semantic",
+    
           stability: 0.3,
           accessCount: 0,
           lastAccessed: 1,
