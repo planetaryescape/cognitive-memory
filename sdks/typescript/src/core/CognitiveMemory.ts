@@ -49,6 +49,7 @@ export class CognitiveMemory {
   private embeddingProvider: EmbeddingProvider;
   private config: ResolvedCognitiveMemoryConfig;
   private engine: CognitiveEngine;
+  private conflictQueue: Array<{ newId: string; existingId: string; similarity: number }> = [];
 
   constructor(options: {
     adapter: MemoryAdapter;
@@ -145,38 +146,33 @@ export class CognitiveMemory {
       for (const mem of extracted) {
         const embedding = await this.embedWithRetry(mem.content);
 
+        // Store the memory immediately (no inline conflict detection)
+        const id = await this.adapter.createMemory({
+          ...mem,
+          embedding,
+        });
+        storedIds.push(id);
+
+        // Tag potential conflicts for deferred LLM resolution at tick
         const existing = await this.adapter.vectorSearch(embedding, {
           userId: this.config.userId,
           limit: 5,
         });
 
-        let shouldStore = true;
         for (const existingMem of existing) {
-          if (existingMem.relevanceScore > 0.85) {
-            const conflict = await detectConflict(existingMem, mem, llm, this.config);
-            if (conflict === "CONTRADICTION" || conflict === "UPDATE") {
-              await this.adapter.updateMemory(existingMem.id, {
-                content: mem.content,
-                importance: Math.max(existingMem.importance, mem.importance),
-                lastAccessed: Date.now(),
-                contradictedBy: conflict === "CONTRADICTION" ? "new" : null,
-              });
-              storedIds.push(existingMem.id);
-              shouldStore = false;
-              break;
-            } else if (conflict === "OVERLAP") {
-              shouldStore = false;
-              break;
-            }
-          }
-        }
+          if (existingMem.id !== id && existingMem.relevanceScore > 0.85) {
+            // Skip if same session root (e.g. dual-perspective of same conversation)
+            const newRoots = new Set((mem.sessionIds ?? []).map(s => s.replace(/_perspective_.*$/, "")));
+            const existingRoots = new Set((existingMem.sessionIds ?? []).map(s => s.replace(/_perspective_.*$/, "")));
+            const hasSharedRoot = [...newRoots].some(r => existingRoots.has(r));
+            if (hasSharedRoot) continue;
 
-        if (shouldStore) {
-          const id = await this.adapter.createMemory({
-            ...mem,
-            embedding,
-          });
-          storedIds.push(id);
+            this.conflictQueue.push({
+              newId: id,
+              existingId: existingMem.id,
+              similarity: existingMem.relevanceScore,
+            });
+          }
         }
       }
     }
@@ -474,11 +470,52 @@ export class CognitiveMemory {
    * Run all periodic maintenance: cold migration, TTL expiry, consolidation
    */
   async tick(llm?: LLMProvider): Promise<void> {
+    // Process deferred conflict queue
+    if (llm) {
+      await this.resolveConflictQueue(llm);
+    }
+
     const now = Date.now();
     const compressor = llm
       ? (contents: string[]) => compressMemories(contents, llm, this.config)
       : undefined;
     await this.engine.tick(now, this.embeddingProvider, compressor);
+  }
+
+  /**
+   * Process pending conflict candidates with LLM verification.
+   * Called during tick() to resolve conflicts deferred from ingestion.
+   */
+  private async resolveConflictQueue(llm: LLMProvider, maxPerTick = 50): Promise<void> {
+    if (this.conflictQueue.length === 0) return;
+
+    // Sort by similarity descending — highest similarity = most likely conflict
+    this.conflictQueue.sort((a, b) => b.similarity - a.similarity);
+
+    const toProcess = this.conflictQueue.splice(0, maxPerTick);
+    let resolved = 0;
+
+    for (const { newId, existingId } of toProcess) {
+      const [newMem, existingMem] = await Promise.all([
+        this.adapter.getMemory(newId),
+        this.adapter.getMemory(existingId),
+      ]);
+
+      if (!newMem || !existingMem) continue;
+      if (existingMem.isSuperseded || newMem.isSuperseded) continue;
+
+      const conflict = await detectConflict(existingMem, newMem, llm, this.config);
+
+      if (conflict === "CONTRADICTION" || conflict === "UPDATE") {
+        await this.adapter.updateMemory(existingId, {
+          content: newMem.content,
+          importance: Math.max(existingMem.importance, newMem.importance),
+          lastAccessed: Date.now(),
+          contradictedBy: conflict === "CONTRADICTION" ? newId : null,
+        });
+        resolved++;
+      }
+    }
   }
 
   /**

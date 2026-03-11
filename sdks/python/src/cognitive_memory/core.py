@@ -34,10 +34,16 @@ from .embeddings import (
 
 logger = logging.getLogger(__name__)
 
-CONFLICT_SIMILARITY_THRESHOLD = 0.6
+CONFLICT_SIMILARITY_THRESHOLD = 0.85
 STABILITY_REINFORCEMENT_THRESHOLD = 0.75
 INGESTION_ASSOCIATION_THRESHOLD = 0.4
 INGESTION_ASSOCIATION_BASE_WEIGHT = 0.2
+
+
+def _session_roots(session_ids: set[str]) -> set[str]:
+    """Extract session roots by stripping '_perspective_*' suffixes."""
+    import re
+    return {re.sub(r"_perspective_.*$", "", sid) for sid in session_ids}
 
 
 class CognitiveMemory:
@@ -88,6 +94,7 @@ class CognitiveMemory:
             raise ValueError(f"Unknown embedder: {embedder}")
 
         self._tick_counter = 0
+        self._conflict_queue: list[tuple[str, str, float]] = []  # (new_id, existing_id, similarity)
 
     # ------------------------------------------------------------------
     # Low-level: add a memory directly
@@ -119,7 +126,12 @@ class CognitiveMemory:
         if session_id:
             mem.session_ids.add(session_id)
 
-        await self._check_conflicts(mem, now)
+        # Tag potential conflicts for deferred resolution at tick
+        if mem.embedding is not None:
+            similar = await self._adapter.search_similar(mem.embedding, top_k=5)
+            for existing_mem, sim in similar:
+                if existing_mem.id != mem.id and sim > CONFLICT_SIMILARITY_THRESHOLD:
+                    self._conflict_queue.append((mem.id, existing_mem.id, sim))
 
         await self._adapter.create(mem)
         return mem
@@ -174,26 +186,30 @@ class CognitiveMemory:
                 for mem, emb in zip(memories, embeddings):
                     mem.embedding = emb
 
-                _hot_count = len(await self._adapter.all_hot())
-                logger.info(f"[ingest:{session_id}] Conflict detection: {len(memories)} new × {_hot_count} hot memories")
-                for _mi, mem in enumerate(memories):
-                    _t0 = _time.time()
-                    await self._check_conflicts(mem, now)
-                    _conflict_ms = (_time.time()-_t0)*1000
-                    if _conflict_ms > 1000:
-                        logger.warning(f"[ingest:{session_id}] conflict check {_mi+1}/{len(memories)} took {_conflict_ms:.0f}ms (SLOW)")
+                _queued = 0
+                for mem in memories:
                     if mem.embedding is not None:
-                        similar = await self._adapter.search_similar(mem.embedding, top_k=3)
+                        similar = await self._adapter.search_similar(mem.embedding, top_k=5)
                         reinforced = []
                         for existing_mem, sim in similar:
-                            if sim > STABILITY_REINFORCEMENT_THRESHOLD and existing_mem.id != mem.id:
+                            if existing_mem.id == mem.id:
+                                continue
+                            # Tag potential conflicts for deferred LLM resolution at tick
+                            if sim > CONFLICT_SIMILARITY_THRESHOLD:
+                                # Skip if same session root (e.g. dual-perspective of same conversation)
+                                if _session_roots(mem.session_ids) & _session_roots(existing_mem.session_ids):
+                                    continue
+                                self._conflict_queue.append((mem.id, existing_mem.id, sim))
+                                _queued += 1
+                            # Stability reinforcement
+                            if sim > STABILITY_REINFORCEMENT_THRESHOLD:
                                 existing_mem.stability = min(1.0, existing_mem.stability + 0.05)
                                 reinforced.append(existing_mem)
                         if reinforced:
                             await self._adapter.batch_update(reinforced)
                     await self._adapter.create(mem)
                     stored.append(mem)
-                logger.info(f"[ingest:{session_id}] Stored {len(stored)} memories, hot total now: {len(await self._adapter.all_hot())}")
+                logger.info(f"[ingest:{session_id}] Stored {len(stored)} memories, queued {_queued} conflict candidates (queue size: {len(self._conflict_queue)})")
 
         # --- Raw turn storage (modes: raw, hybrid) ---
         if mode in ("raw", "hybrid"):
@@ -330,9 +346,67 @@ class CognitiveMemory:
     # ------------------------------------------------------------------
 
     async def tick(self, now: Optional[datetime] = None):
-        """Run periodic maintenance: cold migration, TTL expiry, consolidation."""
+        """Run periodic maintenance: cold migration, TTL expiry, consolidation, conflict resolution."""
         now = now or datetime.now()
+
+        # Process deferred conflict queue (capped per tick)
+        await self._resolve_conflict_queue(now, max_per_tick=50)
+
         await self._engine.tick(now, self._embedder, self._extractor.compress_memories)
+
+    async def _resolve_conflict_queue(self, now: datetime, max_per_tick: int = 50):
+        """Process pending conflict candidates with LLM verification."""
+        if not self._conflict_queue:
+            return
+
+        # Sort by similarity descending — highest similarity = most likely conflict
+        self._conflict_queue.sort(key=lambda x: x[2], reverse=True)
+
+        processed = 0
+        resolved = 0
+        remaining = []
+        demoted: list[Memory] = []
+
+        for new_id, existing_id, sim in self._conflict_queue:
+            if processed >= max_per_tick:
+                remaining.append((new_id, existing_id, sim))
+                continue
+
+            # Look up both memories (they may have been deleted/superseded since queuing)
+            new_mem = await self._adapter.get(new_id)
+            existing_mem = await self._adapter.get(existing_id)
+
+            if new_mem is None or existing_mem is None:
+                processed += 1
+                continue
+            if existing_mem.is_superseded or new_mem.is_superseded:
+                processed += 1
+                continue
+
+            conflict_type = self._extractor.detect_conflict(new_mem, existing_mem)
+            processed += 1
+
+            if conflict_type in ("CONTRADICTION", "UPDATE"):
+                logger.info(
+                    f"[tick:conflict] {conflict_type}: "
+                    f"'{existing_mem.content[:50]}' -> '{new_mem.content[:50]}'"
+                )
+                was_core = existing_mem.category == MemoryCategory.CORE
+                if was_core:
+                    existing_mem.category = MemoryCategory.SEMANTIC
+                existing_mem.contradicted_by = new_mem.id
+                new_mem.importance = max(new_mem.importance, existing_mem.importance)
+                if conflict_type == "CONTRADICTION" and was_core:
+                    new_mem.category = MemoryCategory.CORE
+                demoted.append(existing_mem)
+                resolved += 1
+
+        if demoted:
+            await self._adapter.batch_update(demoted)
+
+        self._conflict_queue = remaining
+        if processed > 0:
+            logger.info(f"[tick:conflict] Processed {processed} candidates, {resolved} conflicts resolved, {len(remaining)} remaining")
 
     # ------------------------------------------------------------------
     # Stats
