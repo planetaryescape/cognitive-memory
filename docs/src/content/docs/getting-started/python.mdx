@@ -88,22 +88,20 @@ The extractor uses a narrator prompt — it records what happened, not interpret
 
 ## Choosing an adapter
 
-By default, `CognitiveMemory` uses the `InMemoryAdapter` (data lives in Python dicts, lost on restart). For persistence:
+By default, `CognitiveMemory` uses the `InMemoryAdapter` (data lives in Python dicts, lost on restart). For persistence, implement the `MemoryAdapter` interface:
 
 ```python
 from cognitive_memory import CognitiveMemory
-# from cognitive_memory.adapters.sqlite import SQLiteAdapter  # not yet implemented
-# from cognitive_memory.adapters.postgres import PostgresAdapter  # not yet implemented
+from cognitive_memory.adapters import MemoryAdapter
 
 # Default: in-memory (great for testing)
 mem = CognitiveMemory()
 
-# With a specific adapter:
-# mem = CognitiveMemory(adapter=SQLiteAdapter("memories.db"))
-# mem = CognitiveMemory(adapter=PostgresAdapter(connection_string))
+# With a custom adapter:
+# mem = CognitiveMemory(adapter=MyCustomAdapter(...))
 ```
 
-See the [Adapters overview](/adapters/overview/) for the full list.
+See the [Custom adapters guide](/adapters/custom/) for how to build your own.
 
 ## Choosing an embedder
 
