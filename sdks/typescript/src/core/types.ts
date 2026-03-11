@@ -16,11 +16,6 @@
 export type MemoryCategory = "episodic" | "semantic" | "procedural" | "core";
 
 /**
- * @deprecated Use MemoryCategory instead
- */
-export type MemoryType = "episodic" | "semantic" | "procedural";
-
-/**
  * Semantic type classification (orthogonal to MemoryCategory)
  */
 export type SemanticType = "fact" | "preference" | "plan" | "transient_state" | "other";
@@ -53,11 +48,6 @@ export interface Memory {
 
   /** Category of memory (affects decay rate and floor) */
   category: MemoryCategory;
-
-  /**
-   * @deprecated Use `category` instead. Kept for backward compatibility.
-   */
-  memoryType: MemoryType;
 
   /** Importance score (0.0-1.0, affects decay resistance) */
   importance: number;
@@ -136,11 +126,6 @@ export interface MemoryInput {
   /** Category of memory */
   category?: MemoryCategory;
 
-  /**
-   * @deprecated Use `category` instead
-   */
-  memoryType?: MemoryType;
-
   /** Importance (0.0-1.0), auto-scored if not provided */
   importance?: number;
 
@@ -178,11 +163,6 @@ export interface RetrievalQuery {
 
   /** Filter by memory categories */
   categories?: MemoryCategory[];
-
-  /**
-   * @deprecated Use `categories` instead
-   */
-  memoryTypes?: MemoryType[];
 
   /** Include associatively linked memories */
   includeAssociations?: boolean;
@@ -241,7 +221,7 @@ export interface SearchResponse {
 }
 
 /**
- * Memory with retrieval score (backward compat)
+ * Memory with retrieval score
  */
 export interface ScoredMemory extends Memory {
   /** Semantic similarity score */
@@ -315,10 +295,6 @@ export interface DecayParameters {
   /** Memory category */
   category: MemoryCategory;
 
-  /**
-   * @deprecated Use `category` instead
-   */
-  memoryType?: MemoryType;
 }
 
 /**
@@ -708,14 +684,6 @@ export interface EmbeddingProvider {
 }
 
 /**
- * Map a MemoryCategory to the deprecated MemoryType field.
- * "core" has no MemoryType equivalent, so it maps to "semantic".
- */
-export function categoryToMemoryType(category: MemoryCategory): MemoryType {
-  return category === "core" ? "semantic" : category;
-}
-
-/**
  * Create a default Memory object with all fields initialized
  */
 export function createDefaultMemory(
@@ -725,7 +693,6 @@ export function createDefaultMemory(
   const category = partial.category ?? "semantic";
   return {
     category,
-    memoryType: categoryToMemoryType(category),
     importance: 0.5,
     stability: 0.3,
     accessCount: 0,

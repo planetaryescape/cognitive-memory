@@ -13,7 +13,7 @@ describe("JsonlFileAdapter", () => {
       userId: "u1",
       content: "a",
       embedding: [1, 0],
-      memoryType: "semantic",
+
       importance: 0.5,
       stability: 0.3,
       accessCount: 0,
@@ -24,7 +24,7 @@ describe("JsonlFileAdapter", () => {
       userId: "u1",
       content: "b",
       embedding: [0, 1],
-      memoryType: "semantic",
+
       importance: 0.5,
       stability: 0.3,
       accessCount: 0,
@@ -49,7 +49,7 @@ describe("JsonlFileAdapter", () => {
       userId: "u1",
       content: "a",
       embedding: [1, 0],
-      memoryType: "semantic",
+
       importance: 0.5,
       stability: 0.3,
       accessCount: 0,
@@ -75,7 +75,7 @@ describe("JsonlFileAdapter", () => {
       userId: "u1",
       content: "a",
       embedding: [1, 0],
-      memoryType: "semantic",
+
       importance: 0.5,
       stability: 0.3,
       accessCount: 0,
@@ -86,7 +86,7 @@ describe("JsonlFileAdapter", () => {
       userId: "u1",
       content: "b",
       embedding: [0, 1],
-      memoryType: "semantic",
+
       importance: 0.5,
       stability: 0.3,
       accessCount: 0,
@@ -114,7 +114,7 @@ describe("JsonlFileAdapter", () => {
       userId: "u1",
       content: "a",
       embedding: [1, 0],
-      memoryType: "semantic",
+
       importance: 0.5,
       stability: 0.3,
       accessCount: 0,
@@ -125,7 +125,7 @@ describe("JsonlFileAdapter", () => {
       userId: "u1",
       content: "b",
       embedding: [0, 1],
-      memoryType: "semantic",
+
       importance: 0.5,
       stability: 0.3,
       accessCount: 0,

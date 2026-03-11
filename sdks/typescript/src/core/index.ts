@@ -24,7 +24,6 @@ export {
   DEFAULT_CONFIG,
   resolveConfig,
   createDefaultMemory,
-  categoryToMemoryType,
   getRetentionFloor,
   getBaseDecayRate,
 } from "./types";
@@ -39,7 +38,6 @@ export type {
   MemoryInput,
   MemoryLink,
   MemoryStats,
-  MemoryType,
   ResolvedCognitiveMemoryConfig,
   RetrievalQuery,
   ScoredMemory,

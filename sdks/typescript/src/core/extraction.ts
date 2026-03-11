@@ -10,7 +10,7 @@
  */
 
 import type { Memory, MemoryCategory, ResolvedCognitiveMemoryConfig, SemanticType } from "./types";
-import { createDefaultMemory, categoryToMemoryType } from "./types";
+import { createDefaultMemory } from "./types";
 
 // ---------------------------------------------------------------------------
 // LLM Provider interface
@@ -136,7 +136,7 @@ function baseMemoryFields(
   config: ResolvedCognitiveMemoryConfig,
   sessionId: string,
   now: number,
-): Omit<MemoryWithoutIds, "content" | "category" | "memoryType" | "importance" | "stability" | "semanticType" | "validFrom" | "validUntil" | "ttlSeconds" | "sourceTurnIds"> {
+): Omit<MemoryWithoutIds, "content" | "category" | "importance" | "stability" | "semanticType" | "validFrom" | "validUntil" | "ttlSeconds" | "sourceTurnIds"> {
   return {
     userId: config.userId,
     accessCount: 0,
@@ -237,7 +237,6 @@ function buildMemories(
       ...baseMemoryFields(config, sessionId, now),
       content,
       category,
-      memoryType: categoryToMemoryType(category),
       importance,
       stability: 0.1 + importance * 0.3,
       semanticType,
@@ -273,7 +272,6 @@ export function extractRawTurns(
       ...baseMemoryFields(config, sessionId, now),
       content: line,
       category: "episodic",
-      memoryType: "episodic",
       importance: 0.5,
       stability: 0.2,
       semanticType: "other",

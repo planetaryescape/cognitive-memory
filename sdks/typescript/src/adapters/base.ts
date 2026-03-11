@@ -17,11 +17,6 @@ export interface MemoryFilters {
   /** Filter by memory categories */
   categories?: MemoryCategory[];
 
-  /**
-   * @deprecated Use `categories` instead
-   */
-  memoryTypes?: string[];
-
   /** Minimum retention threshold */
   minRetention?: number;
 

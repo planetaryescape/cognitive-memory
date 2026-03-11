@@ -90,7 +90,6 @@ export function postgresSchemaSql(options?: {
     `  content text NOT NULL,`,
     `  embedding vector(${dimensions}) NOT NULL,`,
     `  category text NOT NULL DEFAULT 'semantic' CHECK (category IN ('episodic','semantic','procedural','core')),`,
-    `  memory_type text NOT NULL CHECK (memory_type IN ('episodic','semantic','procedural')),`,
     `  importance double precision NOT NULL,`,
     `  stability double precision NOT NULL,`,
     `  access_count integer NOT NULL,`,
@@ -196,9 +195,9 @@ export class PostgresAdapter extends MemoryAdapter {
 
     await this.db.query(
       `INSERT INTO ${this.mem} (
-        id, user_id, content, embedding, category, memory_type, importance, stability, access_count, last_accessed, retention, metadata, is_cold, cold_since, days_at_floor, is_superseded, superseded_by, is_stub, contradicted_by, semantic_type, valid_from, valid_until, ttl_seconds, source_turn_ids, created_at, updated_at
+        id, user_id, content, embedding, category, importance, stability, access_count, last_accessed, retention, metadata, is_cold, cold_since, days_at_floor, is_superseded, superseded_by, is_stub, contradicted_by, semantic_type, valid_from, valid_until, ttl_seconds, source_turn_ids, created_at, updated_at
       ) VALUES (
-        $1, $2, $3, $4::vector, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24::text[], $25, $26
+        $1, $2, $3, $4::vector, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23::text[], $24, $25
       )`,
       [
         id,
@@ -206,7 +205,6 @@ export class PostgresAdapter extends MemoryAdapter {
         memory.content,
         vecLiteral(memory.embedding),
         memory.category ?? "semantic",
-        memory.memoryType ?? "semantic",
         memory.importance,
         memory.stability,
         memory.accessCount,
@@ -296,8 +294,6 @@ export class PostgresAdapter extends MemoryAdapter {
     if (updates.embedding !== undefined)
       add("embedding", vecLiteral(updates.embedding), "::vector");
     if (updates.category !== undefined) add("category", updates.category);
-    if (updates.memoryType !== undefined)
-      add("memory_type", updates.memoryType);
     if (updates.importance !== undefined) add("importance", updates.importance);
     if (updates.stability !== undefined) add("stability", updates.stability);
     if (updates.accessCount !== undefined)
@@ -668,8 +664,6 @@ export class PostgresAdapter extends MemoryAdapter {
     if (filters.userId) add(`user_id =`, filters.userId);
     if (filters.categories && filters.categories.length > 0)
       add(`category = ANY(`, filters.categories, `::text[])`);
-    if (filters.memoryTypes && filters.memoryTypes.length > 0)
-      add(`memory_type = ANY(`, filters.memoryTypes, `::text[])`);
     if (filters.minRetention !== undefined)
       add(`retention >=`, filters.minRetention);
     if (filters.minImportance !== undefined)

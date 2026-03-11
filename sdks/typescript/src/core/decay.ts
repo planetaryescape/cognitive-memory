@@ -50,7 +50,7 @@ export function calculateRetention(
   config?: Partial<ResolvedCognitiveMemoryConfig>,
 ): number {
   const { stability, importance, lastAccessed } = params;
-  const category = params.category ?? (params.memoryType as MemoryCategory) ?? "semantic";
+  const category = params.category ?? "semantic";
 
   assertUnitInterval("stability", stability);
   assertUnitInterval("importance", importance);
@@ -58,40 +58,30 @@ export function calculateRetention(
   const rates = config?.decayRates ?? DEFAULT_CONFIG.decayRates;
   const baseDecay = getBaseDecayRate(category, rates);
 
-  // Procedural memories never decay
   if (category === "procedural" || baseDecay === Number.POSITIVE_INFINITY) {
     return 1.0;
   }
 
-  // Get retention floor
   const floor = getRetentionFloor(category, {
     coreRetentionFloor: config?.coreRetentionFloor ?? DEFAULT_CONFIG.coreRetentionFloor,
     regularRetentionFloor: config?.regularRetentionFloor ?? DEFAULT_CONFIG.regularRetentionFloor,
   });
 
-  // Calculate days since last access
   const now = Date.now();
   const daysSinceAccess = Math.max(
     0,
     (now - lastAccessed) / (1000 * 60 * 60 * 24),
   );
 
-  // Importance boosts decay resistance (multiplier: 1.0 to 3.0)
   const importanceBoost = Math.min(3.0, 1.0 + importance * 2.0);
-
-  // Stability (avoid division by zero)
-  const S = Math.max(stability, 0.01);
-
-  // Combined decay constant
+  const S = Math.max(stability, 0.01); // avoid division by zero
   const effectiveRate = S * importanceBoost * baseDecay;
 
-  // Decay calculation (exponential or power-law)
   const decayModel = config?.decayModel ?? DEFAULT_CONFIG.decayModel;
   const raw = decayModel === "power"
     ? (1 + daysSinceAccess / effectiveRate) ** (-(config?.powerDecayGamma ?? DEFAULT_CONFIG.powerDecayGamma))
     : Math.exp(-daysSinceAccess / effectiveRate);
 
-  // Apply floor
   return Math.max(floor, Math.min(1, raw));
 }
 
@@ -112,13 +102,7 @@ export function updateStability(
   assertUnitInterval("stability", currentStability);
 
   const days = Math.max(0, daysSinceLastAccess);
-
-  // Calculate spacing factor
   const spacingFactor = Math.min(maxMultiplier, days / intervalDays);
 
-  // Stability increase
-  const stabilityIncrease = boost * spacingFactor;
-
-  // Cap at 1.0
-  return Math.min(1.0, currentStability + stabilityIncrease);
+  return Math.min(1.0, currentStability + boost * spacingFactor);
 }

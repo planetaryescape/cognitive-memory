@@ -31,7 +31,7 @@ import type {
   SearchResponse,
   SearchResult,
 } from "./types";
-import { resolveConfig, getRetentionFloor, categoryToMemoryType } from "./types";
+import { resolveConfig, getRetentionFloor } from "./types";
 import { assertNonEmptyString, assertUnitInterval, assertNonNegativeInt } from "./validation";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -80,7 +80,7 @@ export class CognitiveMemory {
       assertUnitInterval("stability", input.stability);
 
     const embedding = await this.embedWithRetry(input.content);
-    const category = input.category ?? input.memoryType ?? "semantic";
+    const category = input.category ?? "semantic";
 
     const now = Date.now();
     const memory: Omit<Memory, "id" | "createdAt" | "updatedAt"> = {
@@ -88,7 +88,6 @@ export class CognitiveMemory {
       content: input.content,
       embedding,
       category,
-      memoryType: categoryToMemoryType(category),
       importance: input.importance ?? this.config.defaultImportance,
       stability: input.stability ?? this.config.defaultStability,
       accessCount: 0,
@@ -262,7 +261,6 @@ export class CognitiveMemory {
       limit = 5,
       minRetention = this.config.minRetention,
       categories,
-      memoryTypes,
       includeAssociations = true,
     } = query;
 
@@ -273,7 +271,6 @@ export class CognitiveMemory {
     const candidates = await this.adapter.vectorSearch(queryEmbedding, {
       userId: this.config.userId,
       categories,
-      memoryTypes,
       minRetention,
       limit: limit * 3,
     });

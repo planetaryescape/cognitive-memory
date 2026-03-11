@@ -28,7 +28,7 @@ describe("PostgresAdapter", () => {
 
     await adapter.vectorSearch([0, 1], {
       userId: "u1",
-      memoryTypes: ["semantic"],
+      categories: ["semantic"],
       minRetention: 0.2,
       limit: 3,
     });
@@ -39,7 +39,7 @@ describe("PostgresAdapter", () => {
     ];
     expect(sql).toContain("(embedding <=> $1::vector)");
     expect(sql).toContain("user_id = $2");
-    expect(sql).toContain("memory_type = ANY(");
+    expect(sql).toContain("category = ANY(");
     expect(sql).toContain("$3::text[])");
     expect(sql).toContain("retention >= $4");
     expect(params[1]).toBe("u1");

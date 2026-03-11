@@ -35,9 +35,6 @@ from .embeddings import (
 )
 from .adapters import MemoryAdapter, InMemoryAdapter
 
-# Backward compat
-from .store import MemoryStore
-
 __version__ = "0.2.0"
 
 __all__ = [
@@ -65,6 +62,4 @@ __all__ = [
     # Adapters
     "MemoryAdapter",
     "InMemoryAdapter",
-    # Backward compat
-    "MemoryStore",
 ]
