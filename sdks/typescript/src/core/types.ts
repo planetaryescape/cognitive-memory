@@ -9,7 +9,7 @@
  * Memory categories with different decay characteristics
  *
  * - Episodic: Events with time/place context (45-day base decay)
- * - Semantic: Facts without temporal context (120-day base decay)
+ * - Semantic: Facts without temporal context (240-day base decay in v0.5 defaults)
  * - Procedural: Skills and how-to knowledge (no decay, updated by correction)
  * - Core: Identity-level facts with high retention floor (120-day base decay)
  */

@@ -34,7 +34,7 @@ from .embeddings import (
     cosine_similarity,
 )
 from .llm import LLMProvider, OpenAILLMProvider, LLMUsage
-from .adapters import MemoryAdapter, InMemoryAdapter, JsonlFileAdapter
+from .adapters import MemoryAdapter, InMemoryAdapter, JsonlFileAdapter, RemoteAdapter, RemoteAdapterError
 
 __version__ = "0.5.1"
 
@@ -68,4 +68,6 @@ __all__ = [
     "MemoryAdapter",
     "InMemoryAdapter",
     "JsonlFileAdapter",
+    "RemoteAdapter",
+    "RemoteAdapterError",
 ]

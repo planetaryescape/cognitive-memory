@@ -1,5 +1,11 @@
 // Adapters
-export type { ConvexAdapterFunctions, JsonlFileAdapterOptions, MemoryFilters, PostgresAdapterOptions } from "./adapters";
+export type {
+  ConvexAdapterFunctions,
+  JsonlFileAdapterOptions,
+  MemoryFilters,
+  PostgresAdapterOptions,
+  RemoteAdapterOptions,
+} from "./adapters";
 export {
   AdapterError,
   ConvexAdapter,
@@ -9,6 +15,8 @@ export {
   MemoryAdapter,
   MemoryNotFoundError,
   PostgresAdapter,
+  RemoteAdapter,
+  RemoteAdapterError,
   postgresSchemaSql,
 } from "./adapters";
 
