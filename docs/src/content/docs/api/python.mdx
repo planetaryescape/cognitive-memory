@@ -92,7 +92,7 @@ results = response.results
 | `deep_recall` | `bool` | `False` | Include cold and superseded records in the candidate set. Stubs stay excluded. |
 | `trace` | `bool` | `False` | When `True`, the response includes a `trace` field with scoring breakdown and pipeline timing details |
 
-Returns a `SearchResponse` object containing a `results` list of `SearchResult` objects sorted by `combined_score` descending, and an optional `trace` field when tracing is enabled.
+Returns a `SearchResponse` object containing a `results` list of `SearchResult` objects sorted by `combined_score` descending, optional `temporal_evidence` when temporal auto-routing fires, and an optional `trace` field when tracing is enabled.
 
 #### `tick(now=None)`
 
@@ -168,6 +168,7 @@ from cognitive_memory import Memory
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `id` | `str` | `uuid4()` | Unique identifier |
+| `user_id` | `str` | `"default"` | Owner scope for multi-tenant adapters |
 | `content` | `str` | `""` | Memory text |
 | `category` | `MemoryCategory` | `EPISODIC` | Memory type |
 | `importance` | `float` | `0.5` | LLM-assessed importance [0,1] |
@@ -185,6 +186,13 @@ from cognitive_memory import Memory
 | `superseded_by` | `str \| None` | `None` | Summary ID |
 | `contradicted_by` | `str \| None` | `None` | Contradicting memory ID |
 | `is_stub` | `bool` | `False` | Archived stub |
+| `memory_type` | `str` | `"other"` | Semantic type: `fact`, `preference`, `plan`, `transient_state`, or `other` |
+| `valid_from` | `datetime \| None` | `None` | Start of validity window |
+| `valid_until` | `datetime \| None` | `None` | End of validity window |
+| `ttl_seconds` | `int \| None` | `None` | Time-to-live from creation |
+| `source_turn_ids` | `list[str]` | `[]` | Source conversation turn IDs |
+| `temporal` | `dict` | `{}` | Experimental temporal metadata for event time, validity status, and raw time expressions |
+| `event_frame` | `dict` | `{}` | Experimental structured event frame |
 
 ### Properties
 

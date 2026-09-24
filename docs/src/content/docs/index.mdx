@@ -31,7 +31,7 @@ Cognitive Memory is the missing middle: what happens to a memory after it's stor
 <span class="section-marker">§ Evidence</span>
 
 <PillRow pills={[
-  { num: "48.5%", label: "multi-hop F1 on LoCoMo", qual: "1540 QA · LLM-as-judge" },
+  { num: "46.2%", label: "overall F1 on LoCoMo", qual: "1540 QA · tuned v0.5 defaults" },
   { num: "71.6%", label: "task-averaged on LongMemEval-S", qual: "comparable to ENGRAM-class systems" },
   { num: "100%",  label: "critical-fact retention on LTI-Bench v2", qual: "controlled 30-day, 42 probes" }
 ]} />
@@ -51,7 +51,7 @@ Write, maintain, retrieve, reinforce, fade, consolidate. Each stage has knobs.
 
 ### 02. Forgetting is control.
 
-Memories fade — but never to zero. The 0.02 floor keeps a six-month-old fact recoverable when the right cue arrives. Core memories floor at 0.60 and stay strong.
+Memories fade to an explicit floor before they leave the hot index. The 0.02 floor keeps a six-month-old fact recoverable when the right cue arrives. Core memories floor at 0.60 and stay strong.
 
 <Figure number="2" caption="Retention over 180 days. Both floors are explicit.">
   <DecayCurve />
@@ -69,9 +69,9 @@ Memories aren't just tagged at extraction. They earn protected status by being a
 ## Six design commitments.
 
 <CommitmentTable rows={[
-  { num: "01", title: "Decay floors.",                       body: "Memories fade on an Ebbinghaus-inspired curve. They never reach zero.",                                                  spec: "<code>R = max(floor, exp(-Δt / (S·B·β_c)))</code><br>floor: 0.02 regular · 0.60 core",     accent: "purple" },
-  { num: "02", title: "Emergent core promotion.",            body: "Use proves importance. Repeated access across sessions earns a 0.60 floor.",                                              spec: "<code>access ≥ 10 ∧ stability ≥ 0.85 ∧ sessions ≥ 3</code>",                              accent: "cyan" },
-  { num: "03", title: "Two-tier retrieval boosting.",        body: "Direct hits reinforce more than associative pull-ins. Active recall vs priming.",                                        spec: "direct +0.10 · associative +0.03",                                                          accent: "green" },
+  { num: "01", title: "Decay floors.",                       body: "Memories fade on an Ebbinghaus-inspired curve, then clamp to an explicit floor.",                                        spec: "<code>R = max(floor, exp(-Δt / (S·B·β_c)))</code><br>floor: 0.02 regular · 0.60 core",     accent: "purple" },
+  { num: "02", title: "Emergent core promotion.",            body: "Use proves importance. Repeated access across sessions earns a 0.60 floor.",                                              spec: "<code>access ≥ 10 ∧ stability ≥ 0.85 ∧ sessions ≥ 2</code>",                              accent: "cyan" },
+  { num: "03", title: "Two-tier retrieval boosting.",        body: "Direct hits reinforce more than associative pull-ins. Active recall vs priming.",                                        spec: "direct +0.10 · associative +0.05",                                                          accent: "green" },
   { num: "04", title: "Bidirectional weighted associations.", body: "Memories that arrive together get linked. Memories that surface together get strengthened. Links decay too.",            spec: "<code>τ = 90 days · cutoff 0.30</code>",                                                  accent: "orange" },
   { num: "05", title: "Hot / cold / stub tiering.",          body: "The hot index converges to 7–11% of total memories. Cold storage is reachable through deep recall.",                     spec: "7 days at floor → cold<br>180 days cold → stub",                                          accent: "pink" },
   { num: "06", title: "Reversible consolidation.",           body: "Clusters of fading memories get summarised. Originals stay in cold storage with backlinks until retention policy converts them to stubs.",        spec: "retention &lt; 0.20 · ≥ 5 memories · cosine ≥ 0.70",                                       accent: "purple" }
@@ -180,20 +180,24 @@ A memory at 20% retention keeps 62% of its similarity score. Old-but-relevant be
 </section>
 
 <section>
-<span class="section-marker">§ New in v0.4.0</span>
+<span class="section-marker">§ New in v0.5.x</span>
 
 <div class="whats-new">
   <div>
-    <strong>Bring your own LLM</strong>
-    <p>No <code>OPENAI_API_KEY</code> required. Implement <code>LLMProvider</code>; inject Anthropic, local, or a gateway.</p>
+    <strong>Tuned defaults</strong>
+    <p>v0.5 moves associative boost to <code>0.05</code>, semantic decay to <code>240</code> days, and core-session threshold to <code>2</code>.</p>
   </div>
   <div>
-    <strong>Multi-tenant by default</strong>
-    <p>Two <code>CognitiveMemory(user_id=...)</code> instances share one adapter without bleeding state.</p>
+    <strong>Decay-floor ablations</strong>
+    <p>Python v0.5.1 exposes <code>decay_floors</code> in config. The first floors-off ablation found no critical-retention drop on 30-day LTI-Bench, narrowing the causal claim.</p>
   </div>
   <div>
-    <strong>File-backed durability</strong>
-    <p><code>JsonlFileAdapter("path.jsonl")</code> ships in Python. Single-process production without a database.</p>
+    <strong>No API break</strong>
+    <p>The public <code>search()</code> flow stays the same. Users who pinned defaults can keep paper-faithful values explicitly.</p>
+  </div>
+  <div>
+    <strong>Temporal metadata</strong>
+    <p>v0.5.1 source adds event-time and validity metadata plus a default-off temporal reconstruction path. Phase 14 kept it experimental.</p>
   </div>
 </div>
 

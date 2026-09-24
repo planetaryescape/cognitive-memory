@@ -12,7 +12,7 @@ class Memory:
     id: str                              # UUID v4, primary key
     user_id: str                         # Owner of this memory; default "default" for single-tenant
     content: str                         # The stored text content
-    category: str                        # Classification label (e.g. "preference", "fact", "event")
+    category: MemoryCategory             # "episodic" | "semantic" | "procedural" | "core"
     importance: float                    # 0.0–1.0, how important this memory is (set at creation, can be promoted)
     stability: float                     # 0.0–1.0, how resistant to decay (increases with repeated access)
     access_count: int                    # Number of times this memory has been retrieved
@@ -33,6 +33,8 @@ class Memory:
     valid_until: Optional[datetime]      # End of temporal validity window (None = no expiry)
     ttl_seconds: Optional[int]           # Time-to-live in seconds from creation (None = no TTL)
     source_turn_ids: list[str]           # Conversation turn IDs that contributed to this memory
+    temporal: dict                       # Experimental temporal metadata
+    event_frame: dict                    # Experimental structured event frame
 ```
 
 ### Field Details
@@ -41,7 +43,7 @@ class Memory:
 |---|---|---|---|
 | `id` | `str` | uuid4() | Unique identifier. Generated at creation. |
 | `content` | `str` | required | The textual content of the memory. Extracted from conversations or provided directly. |
-| `category` | `str` | `"general"` | Classification label used for filtering and organization. Common values: `"preference"`, `"fact"`, `"event"`, `"relationship"`, `"general"`. |
+| `category` | `MemoryCategory` | `EPISODIC` | Decay category: `"episodic"`, `"semantic"`, `"procedural"`, or `"core"`. |
 | `importance` | `float` | `0.5` | Initial importance score. Range 0.0–1.0. Set by the extraction LLM or manually. Memories above 0.8 are candidates for core promotion. |
 | `stability` | `float` | `0.0` | Resistance to decay. Increases with each access. Higher stability means slower decay. Range 0.0–1.0. |
 | `access_count` | `int` | `0` | Incremented each time the memory is returned in a search result. Used for core promotion thresholds. |
@@ -62,6 +64,8 @@ class Memory:
 | `valid_until` | `Optional[datetime]` | `None` | End of the temporal validity window. `None` means no scheduled expiry. |
 | `ttl_seconds` | `Optional[int]` | `None` | Time-to-live in seconds from creation. When set, the memory should be considered expired after `created_at + ttl_seconds`. `None` means no TTL. |
 | `source_turn_ids` | `list[str]` | `[]` | IDs of the conversation turns that contributed to extracting this memory. Used for provenance tracking. |
+| `temporal` | `dict` | `{}` | Experimental temporal metadata: mentioned time, event time, validity status, raw time expressions, and temporal relations. |
+| `event_frame` | `dict` | `{}` | Experimental structured event frame used by the default-off temporal reconstruction path. |
 
 ---
 
@@ -102,6 +106,8 @@ interface Memory {
   validUntil?: number | null;
   ttlSeconds?: number | null;
   sourceTurnIds?: string[];
+  temporal?: TemporalMetadata;
+  eventFrame?: EventFrame;
 }
 
 enum SemanticType {
@@ -113,6 +119,42 @@ enum SemanticType {
 }
 
 type MemoryCategory = "core" | "semantic" | "episodic" | "procedural";
+
+type TemporalStatus =
+  | "planned"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | "hypothetical"
+  | "current"
+  | "superseded"
+  | "unknown";
+
+interface TemporalMetadata {
+  mentionedAt?: { sessionId?: string; timestamp?: string };
+  eventTime?: {
+    start?: string | null;
+    end?: string | null;
+    granularity?: "turn" | "day" | "week" | "month" | "year" | "unknown";
+    rawExpression?: string | null;
+    confidence?: number;
+  };
+  validTime?: {
+    validFrom?: string | null;
+    validTo?: string | null;
+    status?: TemporalStatus;
+  };
+  rawTimeExpressions?: string[];
+}
+
+interface EventFrame {
+  eventType?: "state" | "event" | "plan" | "preference" | "update" | "relationship" | "achievement" | "other";
+  subjects?: string[];
+  action?: string;
+  objects?: string[];
+  location?: string;
+  status?: TemporalStatus;
+}
 ```
 
 ### Field Details
@@ -146,6 +188,8 @@ type MemoryCategory = "core" | "semantic" | "episodic" | "procedural";
 | `validUntil` | `number \| null` | `undefined` | Unix ms — end of the validity window. `null`/`undefined` = no scheduled expiry. |
 | `ttlSeconds` | `number \| null` | `undefined` | Time-to-live in seconds from creation. The memory expires after `createdAt + ttlSeconds * 1000`. |
 | `sourceTurnIds` | `string[]` | `[]` | Conversation turn IDs that contributed to extracting this memory. Provenance tracking. |
+| `temporal` | `TemporalMetadata` | `undefined` | Experimental temporal metadata: mentioned time, event time, validity status, raw time expressions, and temporal relations. |
+| `eventFrame` | `EventFrame` | `undefined` | Experimental structured event frame used by the default-off temporal reconstruction path. |
 
 ---
 
@@ -153,25 +197,33 @@ type MemoryCategory = "core" | "semantic" | "episodic" | "procedural";
 
 ```typescript
 interface StageTrace {
-  stage: string;                        // Name of the search pipeline stage (e.g. "vector", "lexical", "rerank")
-  inputCount: number;                   // Number of candidates entering this stage
-  outputCount: number;                  // Number of candidates leaving this stage
-  durationMs: number;                   // Time spent in this stage in milliseconds
-  promptTokens: number;                 // LLM prompt tokens used in this stage (0 for non-LLM stages)
-  completionTokens: number;            // LLM completion tokens used in this stage (0 for non-LLM stages)
+  name: string;                         // Name of the search pipeline stage (e.g. "vector_search", "bm25_search", "rerank")
+  wallMs: number;                       // Time spent in this stage in milliseconds
+  candidateCount: number;               // Number of candidates observed by this stage
+  promptTokens?: number;                // LLM prompt tokens used in this stage (0 for non-LLM stages)
+  completionTokens?: number;            // LLM completion tokens used in this stage (0 for non-LLM stages)
   metadata?: Record<string, unknown>;   // Optional stage-specific debug data
 }
 
 interface SearchTrace {
-  totalDurationMs: number;              // Total wall-clock time for the search
+  totalWallMs: number;                  // Total wall-clock time for the search
   totalTokens: number;                  // Sum of all prompt + completion tokens across stages
-  stages: StageTrace[];                 // Ordered list of pipeline stage traces
+  stages: Record<string, StageTrace>;   // Pipeline stage traces keyed by stage name
 }
 
 interface SearchResponse {
   results: SearchResult[];              // Ranked results
   evidenceChains: string[][];
-  trace?: SearchTrace;                  // Optional pipeline trace (included when `debug: true`)
+  temporalEvidence?: Array<{
+    memoryId: string;
+    content: string;
+    eventTime?: TemporalMetadata["eventTime"];
+    validTime?: TemporalMetadata["validTime"];
+    mentionedAt?: TemporalMetadata["mentionedAt"];
+    sourceTurnIds?: string[];
+    combinedScore: number;
+  }>;
+  trace?: SearchTrace;                  // Optional pipeline trace (included when `trace: true`)
 }
 
 interface SearchResult {
@@ -216,6 +268,8 @@ interface SearchResult {
 | `valid_until` | `validUntil` | Python `datetime`, TypeScript Unix ms `number`. |
 | `ttl_seconds` | `ttlSeconds` | Same semantics. |
 | `source_turn_ids` | `sourceTurnIds` | snake_case vs camelCase |
+| `temporal` | `temporal` | Same concept. Python uses snake_case keys inside the dict; TypeScript uses camelCase in `TemporalMetadata`. |
+| `event_frame` | `eventFrame` | Python dict vs TypeScript `EventFrame`. Experimental and default-off in retrieval. |
 
 ### Design Rationale
 

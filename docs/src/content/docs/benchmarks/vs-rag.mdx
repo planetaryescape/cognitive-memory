@@ -5,20 +5,24 @@ description: Where a lifecycle memory system differs from standard retrieval-aug
 
 import GroupedBarChart from '../../../components/charts/GroupedBarChart';
 
-## Head-to-head
+## Same-harness LoCoMo check
 
 <GroupedBarChart client:visible
   data={[
-    { metric: 'Overall', cogMem: 44.8, rag: 20 },
-    { metric: 'Multi-hop', cogMem: 48.5, rag: 15 },
+    { metric: 'Overall', cogMem: 44.8, rag: 43.7 },
+    { metric: 'Temporal', cogMem: 48.5, rag: 20.5 },
+    { metric: 'Multi-hop', cogMem: 35.8, rag: 40.1 },
+    { metric: 'Single-hop', cogMem: 48.8, rag: 55.9 },
   ]}
   xKey="metric"
   bars={[
     { dataKey: 'cogMem', name: 'Cognitive Memory', color: '#8b5cf6' },
     { dataKey: 'rag', name: 'Naive RAG', color: '#a1a1aa' },
   ]}
-  yDomain={[0, 55]}
+  yDomain={[0, 60]}
 />
+
+These are the Phase 15 in-house numbers using the corrected LoCoMo category mapping, the same harness, `gpt-4o-mini` answer model, `text-embedding-3-small` embeddings, and token F1 only. The current paper headline of 46.2% overall F1 comes from a later tuned-default snapshot; this page uses the closest apples-to-apples artifact for the Naive RAG comparison.
 
 ## What naive RAG does
 
@@ -34,11 +38,11 @@ No decay, no strengthening, no associations, no consolidation. Every chunk compe
 
 ## Five architectural differences
 
-### 1. Noise reduction through decay
+### 1. Temporal and lifecycle control
 
-After a long conversation history, naive RAG accumulates thousands of chunks. Many are stale, contradicted, or irrelevant. They all compete for the top-k retrieval slots.
+After a long conversation history, naive RAG accumulates thousands of chunks. Many are stale, contradicted, or time-bound. They all compete for the top-k retrieval slots.
 
-Cognitive Memory's decay model naturally suppresses old, unreinforced information. Only memories that have been recently accessed or are inherently important maintain high retrieval scores. The search space is effectively pre-filtered by temporal relevance.
+Cognitive Memory can suppress stale information, preserve reinforced facts, supersede contradicted records, and keep cold or superseded details reachable through deep recall. In the Phase 15 same-harness check, this showed up most clearly on temporal questions.
 
 ### 2. Semantic extraction vs. raw chunking
 
@@ -46,11 +50,11 @@ Naive RAG chunks raw conversation text. These chunks contain filler words, conve
 
 Cognitive Memory extracts discrete facts through LLM extraction. Each memory is a single, clean fact: "User is allergic to peanuts." The embedding is precise and specific, leading to better similarity matches.
 
-### 3. Multi-hop through associations
+### 3. Temporal lifecycle behavior
 
-This is the biggest differentiator. Naive RAG retrieves chunks independently — if answering a question requires two pieces of information from different conversations, both chunks must independently score highly against the query.
+Cognitive Memory's clearest in-house gap over NaiveRAG is temporal. Naive RAG retrieves chunks independently and does not model validity, reinforcement, supersession, or stale-but-still-relevant memory state.
 
-Cognitive Memory's association graph links related memories. Retrieving one activates its neighbors. The multi-hop gap is where this mechanism matters most.
+Cognitive Memory can attach lifecycle metadata, decay and reinforce memories, keep superseded originals behind deep recall, and filter expired transient state from ordinary retrieval.
 
 ### 4. Importance tracking
 
@@ -64,6 +68,10 @@ When a user says "I moved from Portland to Seattle," naive RAG now has two contr
 
 Cognitive Memory queues likely contradictions during ingestion and resolves them during maintenance. Resolved older memories are demoted/superseded so current information has a cleaner path into retrieval.
 
+## What the comparison actually says
+
+Cognitive Memory is not a universal replacement for vector retrieval. In the same-harness LoCoMo check, Naive RAG is better on single-hop and slightly better on the corrected multi-hop bucket. Cognitive Memory is narrowly ahead overall and much stronger on temporal/lifecycle questions. That is the contribution.
+
 ## The chunk overlap problem
 
 Naive RAG often uses overlapping chunks to ensure context isn't split at boundaries. This creates redundant information that inflates the result set. If a fact appears in 3 overlapping chunks, all 3 might be retrieved, wasting 2 of your top-k slots.
@@ -72,13 +80,13 @@ Cognitive Memory stores each fact once. No redundancy, no wasted retrieval slots
 
 ## When naive RAG is still fine
 
-Naive RAG works adequately for:
+Naive RAG works well for:
 - Single-session applications (no temporal dynamics)
 - Simple factual recall (single-hop questions)
 - Document QA (static content that doesn't change)
 - Prototyping (before investing in a proper memory system)
 
-But for multi-session agents that need to reason across conversations, track evolving facts, and handle contradictions, a lifecycle memory system gives you control that naive RAG does not try to provide.
+But for multi-session agents that need to track evolving facts, answer temporal questions, handle contradictions, and preserve provenance through consolidation, a lifecycle memory system gives you control that naive RAG does not try to provide.
 
 ## Migration path
 

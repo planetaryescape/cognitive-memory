@@ -7,7 +7,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## The forgetting curve
 
-Cognitive Memory implements a modified Ebbinghaus forgetting curve. Every memory has a retention score R(m) that decays exponentially over time. The formula:
+Cognitive Memory implements a modified Ebbinghaus forgetting curve. Every memory has a retention score R(m) that decays exponentially over time by default. The formula:
 
 ```
 R(m) = max(floor, exp(-dt / (S * B * beta_c)))
@@ -49,7 +49,7 @@ Each memory category has a base decay rate in days:
 | Category | beta_c (days) |
 |----------|--------------|
 | Episodic | 45 |
-| Semantic | 120 |
+| Semantic | 240 |
 | Procedural | infinity (no decay) |
 | Core | 120 |
 
@@ -62,30 +62,30 @@ Consider a semantic memory with:
 
 ```
 B = 1.0 + (0.7 * 2.0) = 2.4
-effective_rate = 0.3 * 2.4 * 120 = 86.4 days
-R = max(0.02, exp(-30 / 86.4))
-R = max(0.02, exp(-0.347))
-R = max(0.02, 0.707)
-R = 0.707
+effective_rate = 0.3 * 2.4 * 240 = 172.8 days
+R = max(0.02, exp(-30 / 172.8))
+R = max(0.02, exp(-0.174))
+R = max(0.02, 0.841)
+R = 0.841
 ```
 
-This memory still has 70.7% retention after 30 days.
+This memory still has 84.1% retention after 30 days.
 
 Now consider the same memory after 180 days:
 
 ```
-R = max(0.02, exp(-180 / 86.4))
-R = max(0.02, exp(-2.083))
-R = max(0.02, 0.124)
-R = 0.124
+R = max(0.02, exp(-180 / 172.8))
+R = max(0.02, exp(-1.042))
+R = max(0.02, 0.353)
+R = 0.353
 ```
 
-Retention has dropped to 12.4% — but it's still above the 0.02 floor.
+Retention has dropped to 35.3% — still well above the 0.02 floor.
 
 If this were a core memory, the floor would be 0.60:
 
 ```
-R = max(0.60, 0.124)
+R = max(0.60, 0.353)
 R = 0.60
 ```
 
@@ -119,15 +119,14 @@ The core floor catches it at 60%.
   <TabItem label="TypeScript">
     ```typescript
     const daysSinceAccess = (Date.now() - lastAccessed) / (1000 * 60 * 60 * 24);
-    const importanceBoost = 1.0 + importance * 2.0;
-    const frequencyBoost = Math.min(2.0, 1.0 + Math.log1p(accessCount) * 0.1);
-    const decayConstant = stability * importanceBoost * frequencyBoost * baseDecay;
-    const retention = Math.exp(-daysSinceAccess / decayConstant);
+    const importanceBoost = Math.min(3.0, 1.0 + importance * 2.0);
+    const effectiveRate = stability * importanceBoost * baseDecay;
+    const retention = Math.max(floor, Math.exp(-daysSinceAccess / effectiveRate));
     ```
   </TabItem>
 </Tabs>
 
-Note: The TypeScript SDK includes an additional frequency boost factor that provides diminishing returns based on access count.
+Both SDKs use the same retention equation. Retrieval history affects retention indirectly by increasing stability and resetting `lastAccessed`.
 
 ## Power-law decay
 
@@ -174,17 +173,17 @@ Exponential decay drops off sharply — memories become near-zero relatively qui
 
 ### Comparison at a glance
 
-For a memory with S=0.3, B=2.0, beta_c=120 (effective rate = 72 days):
+For a memory with S=0.3, B=2.0, beta_c=240 (effective rate = 144 days):
 
 | dt (days) | Exponential R | Power-law R |
 |-----------|--------------|-------------|
-| 30 | 0.659 | 0.672 |
-| 90 | 0.287 | 0.410 |
-| 180 | 0.082 | 0.253 |
-| 365 | 0.007 | 0.146 |
+| 30 | 0.812 | 0.761 |
+| 90 | 0.535 | 0.496 |
+| 180 | 0.287 | 0.310 |
+| 365 | 0.079 | 0.162 |
 
-The power-law model retains significantly more signal at large time horizons.
+The power-law curve is heavier-tailed at long horizons. It can start lower at short horizons with the current gamma, then hold more signal later.
 
 ## Key insight
 
-The decay model creates a natural priority ordering. Recent, important, frequently-accessed memories score highest. Old, unimportant, rarely-accessed memories fade toward zero. This happens automatically without any manual curation — the system self-organizes just like human memory.
+The decay model creates a natural priority ordering. Recent, important, frequently-accessed memories score highest. Old, unimportant, rarely-accessed memories fade toward their floor, then may leave the hot index through tiered storage. That is the important distinction: the system reduces accessibility before it discards availability.

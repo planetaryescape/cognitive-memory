@@ -9,7 +9,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 In a pure exponential decay model, every memory eventually reaches zero retention. This is fine for episodic details ("what I had for lunch last Tuesday"), but catastrophic for identity-defining facts ("the user is allergic to peanuts").
 
-Decay floors solve this by setting a minimum retention level that a memory can never drop below.
+Decay floors solve this by setting a minimum retention level that a memory can never drop below. They are a design guardrail, not proof by themselves that a benchmark result came from floor-clamping: the Phase 8 LTI-Bench ablation kept critical-fact retention at 100% even with floors set to zero over the 30-day window.
 
 ## Two floor levels
 
@@ -28,7 +28,7 @@ In practice, memories at the 0.02 floor are candidates for cold storage migratio
 
 Core memories — name, age, medical conditions, family relationships — have a 0.60 floor. Even if a core memory hasn't been accessed in years, it retains 60% of its original strength.
 
-This means core memories always rank highly in retrieval when they're relevant. A user's peanut allergy will surface reliably even if it hasn't been mentioned in months.
+This means core memories retain a strong score when they're relevant. In the 30-day LTI-Bench setting, though, repeated direct retrieval and the softened `R^0.3` scoring term were enough to keep critical facts retrievable without floor clamps. Longer-horizon tests are needed to show where the floor itself becomes load-bearing.
 
 ## How the floor works in the decay formula
 
@@ -81,7 +81,7 @@ The floor values are defined in `types.py` / `types.ts`:
   </TabItem>
 </Tabs>
 
-These are not currently configurable at runtime — they're fundamental constants of the system. If you need to adjust them, you can modify the source directly or override the `floor` property on `Memory`.
+Python v0.5.1 exposes `decay_floors` on `CognitiveMemoryConfig`, mainly for ablations and tuning. TypeScript still exposes the fixed defaults through config fields/constants.
 
 ## Interaction with tiered storage
 

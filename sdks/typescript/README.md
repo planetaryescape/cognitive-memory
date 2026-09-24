@@ -4,7 +4,9 @@ Biologically-inspired agent memory with decay, consolidation, and tiered storage
 
 [![npm version](https://img.shields.io/npm/v/cognitive-memory.svg)](https://www.npmjs.com/package/cognitive-memory)
 
-TypeScript SDK. v0.4.0 brings deferred conflict resolution that preserves the audit trail (no silent overwrites), and synaptic-tagging weight curve aligned to the paper. Behavioural parity with the Python SDK.
+TypeScript SDK. The source tree is v0.5.1 and includes the v0.5 tuned defaults, default-off temporal reconstruction metadata, deferred conflict resolution that preserves the audit trail, and synaptic-tagging weight curve aligned to the paper. Behavioural parity with the Python SDK.
+
+As of 2026-05-31, the public npm package still reports v0.4.0. Use a source checkout for v0.5.1 behavior until the npm package is published.
 
 ## Install
 
@@ -79,9 +81,12 @@ const { results } = await mem.search({
 | `JsonlFileAdapter` (durable, single-process) | `cognitive-memory/adapters/jsonl` |
 | `PostgresAdapter` (pgvector) | `cognitive-memory/adapters/postgres` |
 | `ConvexAdapter` | `cognitive-memory` |
+| `RemoteAdapter` (daemon IPC) | `cognitive-memory/adapters/remote` in v0.5.1 source |
 | Custom | implement `MemoryAdapter` |
 
 `PostgresAdapter` exports `postgresSchemaSql` — run it once to create the `memories` and `memory_links` tables with pgvector indexes.
+
+`RemoteAdapter` is present in the v0.5.1 source tree and package manifest. The public npm package still reports v0.4.0 as of 2026-05-31, so install from source for daemon adapter work until npm is published.
 
 ## Multi-tenancy
 
@@ -95,7 +100,7 @@ const bob   = new CognitiveMemory({ adapter: shared, /* ... */ userId: "bob" });
 
 ## Migration
 
-See [`MIGRATION.md`](./MIGRATION.md) for the 0.3.0 → 0.4.0 behavioural changes (no API impact). Conflict resolution now preserves the audit trail — original memories are demoted, not overwritten, and remain queryable with `contradictedBy` set.
+See [`CHANGELOG.md`](./CHANGELOG.md) for v0.5.x defaults, temporal metadata fields, and the 0.3.0 → 0.4.0 behavioural changes. Conflict resolution preserves the audit trail: original memories are demoted, not overwritten, and remain queryable with `contradictedBy` set.
 
 ## Docs
 

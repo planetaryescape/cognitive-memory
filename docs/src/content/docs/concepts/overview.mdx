@@ -29,7 +29,7 @@ Memories are classified into four categories, each with different decay characte
 | Category | Base decay (days) | Floor | Description |
 |----------|------------------|-------|-------------|
 | Episodic | 45 | 0.02 | Events with time/place context |
-| Semantic | 120 | 0.02 | Facts, preferences, relationships |
+| Semantic | 240 | 0.02 | Facts, preferences, relationships |
 | Procedural | infinite | -- | Skills, routines (never decay) |
 | Core | 120 | 0.60 | Identity-defining information |
 
@@ -43,7 +43,7 @@ See [Retrieval scoring](/cognitive-memory/concepts/retrieval-scoring/).
 
 ### 4. Two-tier retrieval boosting
 
-When a memory is retrieved, its stability increases. Direct matches get a larger boost (0.1) than associatively-activated memories (0.03). Both are modulated by a spaced repetition factor: longer gaps between retrievals produce bigger boosts.
+When a memory is retrieved, its stability increases. Direct matches get a larger boost (0.1) than associatively-activated memories (0.05). Both are modulated by a spaced repetition factor: longer gaps between retrievals produce bigger boosts.
 
 See [Retrieval boosting](/cognitive-memory/concepts/retrieval-boosting/).
 
@@ -94,7 +94,7 @@ Conversation text
   Embedding similarity search (hot store)
       |
       v
-  R^alpha temporal scoring
+  R^alpha retention scoring
       |
       v
   Associative expansion (linked memories)
@@ -109,6 +109,6 @@ Conversation text
   Sorted results returned
 ```
 
-Periodic maintenance (`tick()`) handles conflict resolution, cold migration, TTL expiry, and consolidation in the background.
+Periodic maintenance (`tick()`) handles conflict resolution, cold migration, TTL expiry, and consolidation in the background. v0.5.1 source also includes [temporal reconstruction](/cognitive-memory/concepts/temporal-reconstruction/) metadata and routing for sequence questions, but that retrieval mode is experimental and off by default.
 
 See [Scoring pipeline](/cognitive-memory/concepts/scoring-pipeline/) for the complete retrieval flow, and [Ingestion](/cognitive-memory/concepts/ingestion/) for the extraction pipeline.

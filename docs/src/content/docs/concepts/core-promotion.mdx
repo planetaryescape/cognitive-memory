@@ -17,7 +17,7 @@ A memory is promoted to core when it meets **all three** thresholds simultaneous
 |-----------|-----------------|-----------------|
 | `access_count` | >= 10 | How often this memory has been retrieved |
 | `stability` | >= 0.85 | How resistant the memory is to decay |
-| `session_ids` | >= 3 distinct | Whether the memory is relevant across contexts |
+| `session_ids` | >= 2 distinct | Whether the memory is relevant across contexts |
 
 All three must be satisfied. A memory accessed 100 times in a single session won't promote (fails session threshold). A highly stable memory accessed only twice won't promote (fails access count).
 
@@ -91,7 +91,7 @@ Here's a typical lifecycle for a memory that earns core status:
 3. **Sessions 5-8:** Continued retrievals with spaced gaps
    - stability: ~0.88, access_count: 11, sessions: 5
 
-4. **Promotion triggered:** access_count(11) >= 10, stability(0.88) >= 0.85, sessions(5) >= 3
+4. **Promotion triggered:** access_count(11) >= 10, stability(0.88) >= 0.85, sessions(5) >= 2
    - Category changes from SEMANTIC to CORE
    - Floor jumps from 0.02 to 0.60
 
@@ -109,7 +109,7 @@ Promotion is the mechanism for facts that weren't obviously identity-defining at
     config = CognitiveMemoryConfig(
         core_access_threshold=10,        # minimum retrievals
         core_stability_threshold=0.85,   # minimum stability
-        core_session_threshold=3,        # minimum distinct sessions
+        core_session_threshold=2,        # minimum distinct sessions
     )
     ```
   </TabItem>
@@ -120,7 +120,7 @@ Promotion is the mechanism for facts that weren't obviously identity-defining at
     const config: Partial<CognitiveMemoryConfig> = {
       coreAccessThreshold: 10, // minimum retrievals
       coreStabilityThreshold: 0.85, // minimum stability
-      coreSessionThreshold: 3, // minimum distinct sessions
+      coreSessionThreshold: 2, // minimum distinct sessions
     };
     ```
   </TabItem>

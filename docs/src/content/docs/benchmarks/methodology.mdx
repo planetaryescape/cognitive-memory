@@ -56,15 +56,16 @@ When reranking is enabled, the engine retrieves `top_k * rerank_factor` candidat
 
 ## LoCoMo
 
-LoCoMo uses 10 conversations and 1,540 category 1-4 QA items for the standard result. The active current-refresh artifact reports:
+LoCoMo uses 10 conversations and 1,540 category 1-4 QA items for the standard result. The active Phase 5 v0.5 tuned-default artifact reports:
 
 | Metric | Result |
 |--------|:------:|
-| Overall token F1 | 44.8% |
-| Multi-hop token F1 | 48.5% |
-| Judge accuracy | 58.4% |
+| Overall token F1 | 46.2% |
+| Judge accuracy | 61.3% |
 
 Oracle-evidence analysis reports 63.9% LoCoMo-scoring F1 and 61.1% Mem0-scoring F1.
+
+Phase 14 corrected the category mapping used by later per-category analyses (`1=multi-hop`, `2=temporal`, `3=open-domain`, `4=single-hop`). Use recomputed category tables for mechanism claims.
 
 ## LongMemEval-S
 
@@ -76,7 +77,7 @@ The active current-refresh artifact reports:
 | Overall accuracy | 72.6% |
 | Abstention accuracy | 90.0% |
 
-This is effectively tied with ENGRAM-class single-stage systems under the stated protocol. It is not presented as a current SOTA claim.
+This is competitive with ENGRAM-class single-stage systems under the stated protocol. It is not presented as a current SOTA claim.
 
 ## LTI-Bench v2
 

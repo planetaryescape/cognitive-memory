@@ -8,15 +8,15 @@
 
 Memory that behaves like memory. Important things stick, irrelevant things fade, and contradictions get resolved instead of silently overwritten. Built for AI agents that need long-term memory across conversations.
 
-**Current release:** v0.4.0 — Python and TypeScript SDKs at behavioural parity, hybrid retrieval (BM25 + vector), power-law decay, graph expansion, LLM rerank, deferred conflict resolution that preserves the audit trail.
+**Current source release:** v0.5.1 — Python and TypeScript SDKs at behavioural parity, with v0.5 tuned defaults (`associative_boost`/`associativeBoost` 0.05, semantic decay 240 days, core session threshold 2), hybrid retrieval, graph expansion, LLM rerank, default-off temporal reconstruction metadata, and deferred conflict resolution that preserves the audit trail. PyPI is published at v0.5.1; npm still reports v0.4.0 as of 2026-05-31, so TypeScript v0.5.1 users should install from source until the package is published.
 
 **Benchmark highlights** (v6 retrieval pipeline, refresh of 2026-05-05/06):
 
 | Benchmark | Result | Comparison |
 | --- | --- | --- |
-| **LoCoMo** (10 conv, 1540 QA) | 44.8% overall F1 · 48.5% multi-hop F1 | 1.7× Mem0's 28.4% multi-hop · 70% of LoCoMo oracle evidence context condition (63.9%) |
+| **LoCoMo** (10 conv, 1540 QA) | 46.2% overall F1 · 51.3% multi-hop F1 | 1.8× Mem0's 28.4% multi-hop · 72% of LoCoMo oracle evidence context condition (63.9%) |
 | **LongMemEval-S** (500 Q) | 71.6% task-averaged accuracy · 72.6% overall accuracy | Competitive with ENGRAM 71.4% · +15.4pp over full-context 56.2% |
-| **LTI-Bench** (controlled, 42 probes) | 88.1% accuracy · 100% critical-fact retention | FadeMem 82.1% critical retention |
+| **LTI-Bench** (controlled, 42 probes) | 88.1% accuracy · 69.7% F1 · 100% critical-fact retention | FadeMem 82.1% critical retention |
 
 Methodology, parameters, and per-category breakdowns live in the [benchmark repo](https://github.com/planetaryescape/cognitive-memory-benchmarks).
 
@@ -104,7 +104,7 @@ const mem = new CognitiveMemory({
 
 ## Key Features
 
-- **Power-law decay** — Default `R(t) = (1 + t/s)^(−γ)`, with `exponential` available behind a config flag. Power-law matches the empirical forgetting curve and adds +3.2pp on LoCoMo over exponential.
+- **Configurable decay curves** — Exponential decay remains the default; power-law is available behind `decay_model="power"` / `decayModel: "power"` and improved the conv-0 decay comparison.
 - **Hybrid retrieval** — Vector similarity fused with BM25 lexical search; `hybridSearch: true` enables it. Surfaces both semantically-related and exact-keyword matches.
 - **Graph expansion** — One-hop or two-hop traversal across the association graph at query time. Bridge discovery (`bridgeDiscovery: true`) finds evidence chains across multiple memories — the multi-hop reasoning lever.
 - **LLM rerank** — Optional post-retrieval rerank via the LLM provider with a configurable candidate pool (`rerankFactor`). +1.9pp on LoCoMo headline.
@@ -122,30 +122,34 @@ const mem = new CognitiveMemory({
 | --- | --- | --- |
 | In-memory | ✓ | ✓ |
 | JSONL file (durable, single-process) | ✓ | ✓ |
-| Postgres (pgvector) | 0.4.1 (planned) | ✓ |
+| Postgres (pgvector) | — | ✓ |
 | Convex | — | ✓ |
+| Remote daemon | source adapter | source adapter |
 | Custom (`MemoryAdapter` interface) | ✓ | ✓ |
+
+The remote daemon adapters live in source and back the daemon deployment shape. The v0.5.1 TypeScript source manifest exports `cognitive-memory/adapters/remote`; the public npm package still reports v0.4.0, so npm users do not have that v0.5.1 surface until the package is published. Use a source checkout or the daemon repo docs as the canonical install path for daemon mode until then.
 
 ## Docs
 
 Full documentation, guides, concepts, benchmarks, and API reference at **[planetaryescape.github.io/cognitive-memory](https://planetaryescape.github.io/cognitive-memory)**.
 
-Migration: [Python 0.3.0 → 0.4.0](./sdks/python/MIGRATION.md) · [TypeScript 0.3.0 → 0.4.0](./sdks/typescript/MIGRATION.md).
+Migration and release notes: [Python changelog](./sdks/python/CHANGELOG.md) · [TypeScript changelog](./sdks/typescript/CHANGELOG.md).
 
 ## Daemon mode
 
-For a long-running shared-process deployment — one embedding model loaded once, single SQLite writer, cross-agent visibility, central lifecycle scheduling — point both SDKs at the [**`cognitive-memory-daemon`**](https://github.com/planetaryescape/cognitive-memory-daemon) Rust service. Multiple AI clients on the same machine (Claude Code, Cursor, scripts, the SDK in `RemoteAdapter` mode) share one canonical store over a Unix socket.
+For a long-running shared-process deployment — one embedding model loaded once, single SQLite writer, cross-agent visibility, central lifecycle maintenance via explicit ticks — point clients at the [**`cognitive-memory-daemon`**](https://github.com/planetaryescape/cognitive-memory-daemon) Rust service. Multiple AI clients on the same machine (Claude Code, Cursor, scripts, SDK source builds in `RemoteAdapter` mode) share one canonical store over a Unix socket.
 
 ```python
 from cognitive_memory import CognitiveMemory
 from cognitive_memory.adapters.remote import RemoteAdapter
 
 cm = CognitiveMemory(adapter=RemoteAdapter(user_id="alice"), user_id="alice")
-# Auto-spawns the daemon on first call. All in-process methods now go
-# through the daemon: shared embedding cache, single writer, central tick.
+# Connects to a running daemon. All in-process methods now go through
+# the daemon: shared embedding cache, single writer, central tick.
 ```
 
 ```typescript
+// Source builds only until the public npm package is published at v0.5.1.
 import { CognitiveMemory } from "cognitive-memory";
 import { RemoteAdapter } from "cognitive-memory/adapters/remote";
 
@@ -154,6 +158,8 @@ const cm = new CognitiveMemory({
   // ...
 });
 ```
+
+Note: the TypeScript remote adapter is present in source and listed in the v0.5.1 source package `exports` map. The blocker is publication state: the public npm package still resolves to v0.4.0.
 
 The daemon also ships a `cm` CLI and a loopback HTTP bridge (`cm-http`) for browser clients. See the [daemon repo](https://github.com/planetaryescape/cognitive-memory-daemon) for the full architecture, `cm` command reference, and install instructions.
 

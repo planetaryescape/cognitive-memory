@@ -23,7 +23,7 @@ Long-running conversations across many sessions. Needs to remember user preferen
         retrieval_score_exponent=0.3,
         direct_boost=0.1,
         core_access_threshold=10,
-        core_session_threshold=3,
+        core_session_threshold=2,
     )
     # Search with: top_k=20, deep_recall=False
     ```
@@ -37,7 +37,7 @@ Long-running conversations across many sessions. Needs to remember user preferen
       retrievalScoreExponent: 0.3,
       directBoost: 0.1,
       coreAccessThreshold: 10,
-      coreSessionThreshold: 3,
+      coreSessionThreshold: 2,
     };
     // Search with: limit=20, deepRecall=false
     ```
@@ -357,7 +357,7 @@ Controls how much retrieving a memory strengthens it (spaced repetition).
 | Parameter | Default | Effect of increasing |
 |-----------|:-------:|----------------------|
 | `direct_boost` | 0.1 | Memories stabilize faster with fewer retrievals |
-| `associative_boost` | 0.03 | Linked memories strengthen more from co-retrieval |
+| `associative_boost` | 0.05 | Linked memories strengthen more from co-retrieval |
 | `max_spaced_rep_multiplier` | 2.0 | Larger bonus for accessing long-idle memories |
 | `spaced_rep_interval_days` | 7.0 | Full bonus kicks in sooner after last access |
 
@@ -373,7 +373,7 @@ Core memories have a high retention floor (0.60) and never get cold-migrated. Th
 |-----------|:-------:|-------------------|
 | `core_access_threshold` | 10 | Fewer retrievals needed for promotion |
 | `core_stability_threshold` | 0.85 | Lower stability bar for promotion |
-| `core_session_threshold` | 3 | Fewer distinct sessions needed |
+| `core_session_threshold` | 2 | Fewer distinct sessions needed |
 
 **Too few core promotions?** Lower all three (e.g., 5, 0.7, 2).
 
@@ -390,11 +390,11 @@ Base decay rates are category-level constants:
 | Category | Decay rate (days) | Floor | Behavior |
 |----------|:-----------------:|:-----:|----------|
 | Episodic | 45 | 0.02 | Fades relatively fast |
-| Semantic | 120 | 0.02 | Fades slowly |
+| Semantic | 240 | 0.02 | Fades slowly |
 | Procedural | Infinity | 0.02 | Never decays |
 | Core | 120 | 0.60 | Fades slowly, high floor |
 
-You can't change base decay rates via config — they're set by memory category. To make memories last longer, increase `direct_boost` or use `custom_extraction_instructions` to bias toward higher importance scores (stability = 0.1 + importance * 0.3).
+You can override base decay rates through `base_decay_rates` in Python and `decayRates` in TypeScript. If you only want memories to last longer after use, tune `direct_boost` first; if the category itself is wrong for your domain, change the category decay rate explicitly.
 
 ### Associations
 

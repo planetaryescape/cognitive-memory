@@ -40,7 +40,7 @@ The query text is embedded, and the hot store is searched for the top candidates
   </TabItem>
 </Tabs>
 
-When reranking is enabled, the search can request `top_k * rerank_factor` candidates before slicing back to the requested `top_k`.
+When reranking is enabled, the search requests an expanded pool: at least `top_k * rerank_factor`, with `k_rerank` as a floor. When temporal query routing is enabled and the query is classified as temporal, the candidate pool is also raised to at least `temporal_candidate_k` / `temporalCandidateK`.
 
 ### Stage 1b: Lexical/BM25 search (v6, when hybrid enabled)
 
@@ -92,6 +92,12 @@ Candidates with semantic type `plan` or `transient_state` whose validity window 
 
 When `rerank_enabled` / `rerankEnabled` is `True` and an LLM provider is available, the engine retrieves an expanded candidate pool (`top_k * rerank_factor`, with `k_rerank` as a floor), sends those candidates to the LLM, then returns the requested `top_k`. This can improve precision for ambiguous or nuanced queries at the cost of additional latency and token usage. The model used defaults to the configured extraction model unless `rerank_model` / `rerankModel` is set explicitly.
 
+### Stage 2d: Temporal reconstruction (experimental)
+
+When `temporal_query_mode="auto"` / `temporalQueryMode: "auto"` and the query looks temporal, the engine applies temporal-specific scoring before final serialization. It uses `temporal_decay_alpha` / `temporalDecayAlpha`, boosts explicit time expressions and validity-status matches, and orders `temporal_evidence` / `temporalEvidence` chronologically for the answer model.
+
+This stage is default-off. Phase 14 kept it experimental because the held-out A/B gain was small and uncertain.
+
 ### Stage 3: Associative expansion
 
 For each direct result, the engine looks up its association graph:
@@ -132,7 +138,7 @@ After associative expansion, the engine can perform a second hop through the ass
 All memories in the result set receive retrieval boosts:
 
 - **Direct results:** `stability += 0.1 * spaced_rep_factor`
-- **Associative results:** `stability += 0.03 * spaced_rep_factor`
+- **Associative results:** `stability += 0.05 * spaced_rep_factor`
 
 Both types also get: `access_count += 1`, `last_accessed_at = now`, session ID added.
 
@@ -158,7 +164,7 @@ Every memory in the result set is checked against the core promotion criteria:
   </TabItem>
 </Tabs>
 
-If a memory has access_count >= 10, stability >= 0.85, and sessions >= 3, it's promoted to core.
+If a memory has access_count >= 10, stability >= 0.85, and sessions >= 2, it's promoted to core.
 
 ### Stage 6: Co-retrieval strengthening
 
@@ -218,6 +224,7 @@ In v6, `search()` returns a **`SearchResponse`** wrapper instead of a bare list.
     @dataclass
     class SearchResponse:
         results: list[SearchResult]  # ranked results (same as before)
+        temporal_evidence: list[dict]
         trace: SearchTrace           # pipeline instrumentation
 
     @dataclass
@@ -232,17 +239,17 @@ In v6, `search()` returns a **`SearchResponse`** wrapper instead of a bare list.
     @dataclass
     class SearchTrace:
         stages: dict[str, StageTrace]
-        total_ms: float
+        total_wall_ms: float
         total_tokens: int    # sum of all prompt + completion tokens across stages
 
     @dataclass
     class StageTrace:
         name: str            # e.g. "vector_search", "bm25_search", "validity_filter", "rerank"
         candidate_count: int # candidates entering this stage
-        survivor_count: int  # candidates leaving this stage
-        duration_ms: float
+        wall_ms: float
         prompt_tokens: int   # LLM prompt tokens used (0 for non-LLM stages)
         completion_tokens: int # LLM completion tokens used (0 for non-LLM stages)
+        metadata: dict
     ```
   </TabItem>
   <TabItem label="TypeScript">
@@ -250,6 +257,7 @@ In v6, `search()` returns a **`SearchResponse`** wrapper instead of a bare list.
     interface SearchResponse {
         results: SearchResult[];
         evidenceChains: string[][];
+        temporalEvidence?: TemporalEvidence[];
         trace?: SearchTrace;
     }
 
@@ -260,6 +268,16 @@ In v6, `search()` returns a **`SearchResponse`** wrapper instead of a bare list.
         combinedScore: number;
         isAssociative: boolean;
         viaDeepRecall: boolean;
+    }
+
+    interface TemporalEvidence {
+        memoryId: string;
+        content: string;
+        eventTime?: unknown;
+        validTime?: unknown;
+        mentionedAt?: unknown;
+        sourceTurnIds?: string[];
+        combinedScore: number;
     }
 
     interface SearchTrace {
@@ -274,6 +292,7 @@ In v6, `search()` returns a **`SearchResponse`** wrapper instead of a bare list.
         wallMs: number;
         promptTokens?: number;      // LLM prompt tokens used (0 for non-LLM stages)
         completionTokens?: number;  // LLM completion tokens used (0 for non-LLM stages)
+        metadata?: Record<string, unknown>;
     }
     ```
   </TabItem>
@@ -281,7 +300,7 @@ In v6, `search()` returns a **`SearchResponse`** wrapper instead of a bare list.
 
 ### Trace / instrumentation
 
-The `SearchTrace` attached to every response provides full visibility into the pipeline. Each `StageTrace` records the stage name, how many candidates entered and survived, and wall-clock time. This is useful for debugging relevance issues, tuning `top_k` multipliers, and understanding why specific memories did or did not appear.
+The `SearchTrace` attached to every response provides full visibility into the pipeline. Each `StageTrace` records the stage name, candidate count, optional token counts, metadata, and wall-clock time. This is useful for debugging relevance issues, tuning `top_k` multipliers, and understanding why specific memories did or did not appear.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -321,6 +340,7 @@ Stage 1b: BM25 lexical search (if hybrid enabled)
 Stage 2:  Score by sim * R^alpha
 Stage 2b: Validity filtering (expired plan/transient exclusion)
 Stage 2c: LLM reranking (if enabled; top_k * rerank_factor candidates -> top_k)
+Stage 2d: Temporal evidence ordering (if temporal auto mode fires)
     |
     v
 Stage 3:  Expand via associations (cold store too)
@@ -336,7 +356,7 @@ Stage 5: Check core promotions
 Stage 6: Strengthen co-retrieved associations
     |
     v
-Merge, sort, return SearchResponse (results + trace)
+Merge, sort, return SearchResponse (results + temporal evidence + trace)
 ```
 
 Every search actively reshapes the memory system: boosting stabilities, creating/strengthening associations, promoting cores, and reactivating cold memories. The system gets smarter with every query.

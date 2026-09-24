@@ -20,9 +20,8 @@ The standard result here uses 10 conversations and the 1,540 category 1-4 questi
 
 <GroupedBarChart client:visible
   data={[
-    { metric: 'Overall token F1', value: 44.8 },
-    { metric: 'Multi-hop token F1', value: 48.5 },
-    { metric: 'Judge accuracy', value: 58.4 },
+    { metric: 'Overall token F1', value: 46.2 },
+    { metric: 'Judge accuracy', value: 61.3 },
   ]}
   xKey="metric"
   bars={[
@@ -33,32 +32,35 @@ The standard result here uses 10 conversations and the 1,540 category 1-4 questi
 
 | Metric | Result |
 |--------|:------:|
-| Overall token F1 | 44.8% |
-| Multi-hop token F1 | 48.5% |
-| Judge accuracy | 58.4% |
-| Oracle evidence ceiling | 63.9% LoCoMo scoring / 61.1% Mem0 scoring |
+| Overall token F1 | 46.2% |
+| Judge accuracy | 61.3% |
+| Oracle evidence condition | 63.9% LoCoMo scoring / 61.1% Mem0 scoring |
 
-The current LoCoMo result reaches about 70.0% of the LoCoMo oracle-evidence ceiling. That is the right framing: retrieval and answer utilization still leave headroom.
+The current LoCoMo result reaches about 72.4% of the LoCoMo oracle-evidence condition. That is the right framing: retrieval and answer utilization still leave headroom.
 
 ## What changed from older runs
 
-Older run labels such as Run F and Run H are historical. The active LoCoMo number is the current SDK full run, not the earlier conv-0 rerank pilot.
+Older run labels such as Run F and Run H are historical. The active LoCoMo number is the Phase 5 v0.5 tuned-default run, not the earlier conv-0 rerank pilot or the May current-refresh baseline.
 
 The old conv-0 rerank pilot remains useful as an ablation signal, but it should not be cited as a full benchmark result.
 
 ## What we learned
 
-### Multi-hop is the strongest LoCoMo signal
+### Temporal lifecycle recall is the sharpest in-house signal
 
-The 48.5% multi-hop F1 result is the clearest LoCoMo evidence for associative retrieval and broader candidate recall. Multi-hop questions often require a memory that is related to another retrieved memory, not directly similar to the query.
+The relabelled current-refresh artifact shows the clearest in-house gap on temporal questions: Cognitive Memory 48.5% F1 versus NaiveRAG 20.5% F1 under the same harness and answer model. That is the strongest LoCoMo evidence for lifecycle machinery: validity, decay-aware ranking, reinforcement, and deep recall.
+
+Multi-hop remains important, but the later NaiveRAG comparison made the claim narrower. NaiveRAG was competitive or better on some direct lookup categories, so multi-hop should not be used as blanket proof that the full architecture beats vector retrieval everywhere.
 
 ### Retrieval is still the bottleneck
 
-The oracle evidence ceiling is much higher than the current end-to-end score. That means the architecture helps, but better retrieval and answer use are still major improvement areas.
+The oracle evidence condition is much higher than the current end-to-end score. That means the architecture helps, but better retrieval and answer use are still major improvement areas.
 
-### Temporal questions remain difficult
+### Temporal questions need a separate adoption gate
 
-Temporal questions require precise date extraction and as-of reasoning. They remain harder than ordinary factual recall and are called out as future work in the paper.
+Temporal questions require event time, validity status, and ordered evidence, not just semantic recall with timestamps attached. Phase 14 added [temporal reconstruction](/cognitive-memory/concepts/temporal-reconstruction/) as a default-off retrieval path and tested it in a paired A/B. The held-out gain was small and uncertain (+0.75pp mean delta, confidence interval crossing zero), so `temporal_query_mode` stayed off by default.
+
+One correction matters for reading older notes: Phase 14 fixed the LoCoMo category mapping (`1=multi-hop`, `2=temporal`, `3=open-domain`, `4=single-hop`, `5=adversarial`). Pre-correction "temporal is weakest" claims should be treated as historical unless the table was recomputed with that mapping.
 
 ## Methodology
 
@@ -70,5 +72,6 @@ All current LoCoMo results use:
 - `text-embedding-3-small` embeddings
 - GPT-4o judge
 - current SDK scoring: `sim(m,q) * R(m)^alpha`, default `alpha=0.3`
+- v0.5 tuned defaults: associative boost `0.05`, semantic decay `240` days, core-session threshold `2`
 
 See [Methodology](/cognitive-memory/benchmarks/methodology/) for the pipeline and [experimentlog.md](https://github.com/planetaryescape/cognitive-memory/blob/main/cognitive-memory-benchmarks/experimentlog.md) for logged artifacts.

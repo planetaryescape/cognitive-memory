@@ -1,0 +1,77 @@
+---
+title: Temporal Reconstruction
+description: Experimental default-off support for event time, validity status, and chronological evidence.
+---
+
+## Why timestamps are not enough
+
+A memory has at least three different kinds of time:
+
+- **Mentioned time:** when the user said it.
+- **Event time:** when the thing happened or is planned to happen.
+- **Valid time:** when the fact is true.
+
+Those are not interchangeable. "I might apply to Oxford next month" and "I sent the Oxford application yesterday" should not become the same timeless fact. One is a plan, the other is a completed event that updates the plan.
+
+## What the SDK stores
+
+Python memories have `temporal` and `event_frame` dictionaries. TypeScript memories have `temporal` and `eventFrame`.
+
+The extraction prompt asks for:
+
+- `mentioned_at` / `mentionedAt`
+- `event_time` / `eventTime`
+- `valid_time` / `validTime`
+- `raw_time_expressions` / `rawTimeExpressions`
+- event-frame fields such as subject, action, object, location, and status
+
+The ordinary decay category still controls retention. The temporal fields are extra structure for sequence and as-of reasoning.
+
+## Query-time behavior
+
+Temporal reconstruction is off by default:
+
+```python
+config = CognitiveMemoryConfig(temporal_query_mode="off")
+```
+
+```typescript
+const config = { temporalQueryMode: "off" };
+```
+
+When set to `"auto"`, the engine classifies temporal queries, broadens the candidate pool, scores candidates with temporal-specific boosts, and returns chronological evidence in `temporal_evidence` / `temporalEvidence`.
+
+Examples of routed queries:
+
+- "What happened after Alice injured her ankle?"
+- "What was current at the time?"
+- "What changed after the move?"
+- "What happened first?"
+
+## Why it is default-off
+
+Phase 14 tested this as a paired LoCoMo A/B. The held-out result was small and uncertain: +0.75pp mean temporal delta, with a confidence interval crossing zero. The default stayed `off`.
+
+Two useful lessons survived the experiment:
+
+- The query classifier fix was kept because it reduced false positives.
+- The extraction prompt was corrected so `valid_time.status` and `raw_time_expressions` are reliably populated. Any future adoption decision needs a fresh A/B after that prompt fix.
+
+## Use it when
+
+Use temporal auto mode when your product answers sequence, current-state, plan-status, or "what changed?" questions and you can validate it on your own workload.
+
+Leave it off when your workload is mostly direct lookup, or when you have not measured whether the temporal routing improves results.
+
+## Related configuration
+
+| Python | TypeScript | Default |
+|--------|------------|:-------:|
+| `temporal_query_mode` | `temporalQueryMode` | `"off"` |
+| `temporal_candidate_k` | `temporalCandidateK` | `80` |
+| `temporal_final_k` | `temporalFinalK` | `20` |
+| `temporal_decay_alpha` | `temporalDecayAlpha` | `0.25` |
+| `temporal_anchor_neighbor_boost` | `temporalAnchorNeighborBoost` | `0.30` |
+| `temporal_validity_match_boost` | `temporalValidityMatchBoost` | `0.35` |
+| `temporal_time_expression_boost` | `temporalTimeExpressionBoost` | `0.15` |
+

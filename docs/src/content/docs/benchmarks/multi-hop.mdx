@@ -15,23 +15,25 @@ Multi-hop questions require combining information from two or more stored memori
 
 This matters because vector search retrieves each memory independently. A memory can be necessary for the answer even if it is not very similar to the query.
 
-## Current LoCoMo multi-hop result
+## Corrected LoCoMo multi-hop view
 
 <HorizontalBarChart client:visible
   data={[
-    { system: 'Cognitive Memory', accuracy: 48.5 },
+    { system: 'Cognitive Memory', accuracy: 35.8 },
+    { system: 'Naive RAG', accuracy: 40.1 },
     { system: 'FadeMem', accuracy: 29.4 },
     { system: 'Mem0', accuracy: 28.4 },
-    { system: 'Naive RAG', accuracy: 15 },
   ]}
   yKey="system"
   dataKey="accuracy"
   name="Multi-hop token F1"
-  colors={['#8b5cf6', '#10b981', '#f59e0b', '#a1a1aa']}
-  xDomain={[0, 55]}
+  colors={['#8b5cf6', '#a1a1aa', '#10b981', '#f59e0b']}
+  xDomain={[0, 45]}
 />
 
-The active current result is 48.5% multi-hop token F1 on the full LoCoMo category 1-4 set. Older conv-0 rerank pilots are useful ablations, not full benchmark results.
+Phase 14 corrected the LoCoMo category mapping. On the relabelled current-refresh artifact, Cognitive Memory's multi-hop F1 is 35.8%. The in-house NaiveRAG baseline reaches 40.1% under the same harness and answer model, so this category is not where the lifecycle architecture cleanly beats vector retrieval.
+
+The older 51.3% number came from the Phase 5 paper table before the category-label correction and should not be used as a mechanism claim.
 
 ## Why associations help
 
@@ -45,4 +47,4 @@ Consolidation can move originals out of the normal search path. Deep recall brin
 
 ## Takeaway
 
-Multi-hop is not "the" memory benchmark. It is a useful lens for one part of memory: whether a system can connect facts across time and context. If your application mostly needs isolated factual lookup, multi-hop matters less. If it needs personal-assistant-style reasoning over weeks or months, it matters a lot.
+Multi-hop is not "the" memory benchmark. It is a useful lens for one part of memory: whether a system can connect facts across time and context. The current evidence says Cognitive Memory's sharper advantage is temporal lifecycle recall, while multi-hop needs better retrieval/evidence composition.

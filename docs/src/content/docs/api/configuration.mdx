@@ -26,16 +26,18 @@ mem = CognitiveMemory(config=config)
 | `decay_model` | `str` | `"exponential"` | Decay curve: `"exponential"` or `"power"` |
 | `power_decay_gamma` | `float` | `1.4427` | Gamma exponent for power-law decay (only used when `decay_model="power"`) |
 
-The base decay rates and floors are defined as module-level constants:
+The base decay rates and floors are configurable. Defaults are copied from module constants so each config can be mutated without leaking into another instance:
 
 | Constant | Value | Description |
 |----------|:-----:|-------------|
 | `BASE_DECAY_RATES[EPISODIC]` | 45.0 | Episodic decay rate (days) |
-| `BASE_DECAY_RATES[SEMANTIC]` | 120.0 | Semantic decay rate (days) |
+| `BASE_DECAY_RATES[SEMANTIC]` | 240.0 | Semantic decay rate (days) |
 | `BASE_DECAY_RATES[PROCEDURAL]` | infinity | Procedural never decays |
 | `BASE_DECAY_RATES[CORE]` | 120.0 | Core decay rate (days) |
 | `DECAY_FLOORS["core"]` | 0.60 | Core retention floor |
 | `DECAY_FLOORS["regular"]` | 0.02 | Regular retention floor |
+
+Python v0.5.1 exposes `decay_floors` directly on `CognitiveMemoryConfig` for controlled ablations. TypeScript exposes the matching `coreRetentionFloor` and `regularRetentionFloor` config fields.
 
 ### Hybrid search
 
@@ -50,6 +52,20 @@ The base decay rates and floors are defined as module-level constants:
 |-----------|------|:-------:|-------------|
 | `filter_expired_transients` | `bool` | `True` | Filter out transient memories past their expiry |
 | `include_expired_in_deep_recall` | `bool` | `True` | Include expired transients when deep recall is enabled |
+
+### Temporal reconstruction
+
+Temporal reconstruction is experimental and off by default. Phase 14 tested it on LoCoMo and kept the default off because the held-out A/B gain was small and uncertain.
+
+| Parameter | Type | Default | Description |
+|-----------|------|:-------:|-------------|
+| `temporal_query_mode` | `str` | `"off"` | `"off"` or `"auto"` temporal query routing |
+| `temporal_candidate_k` | `int` | `80` | Candidate pool floor for temporal queries |
+| `temporal_final_k` | `int` | `20` | Max chronological evidence items returned |
+| `temporal_decay_alpha` | `float` | `0.25` | Retention exponent used in temporal retrieval |
+| `temporal_anchor_neighbor_boost` | `float` | `0.30` | Boost for memories near a temporal anchor |
+| `temporal_validity_match_boost` | `float` | `0.35` | Boost for current/as-of validity matches |
+| `temporal_time_expression_boost` | `float` | `0.15` | Boost for explicit time expressions |
 
 ### Graph
 
@@ -71,7 +87,7 @@ The base decay rates and floors are defined as module-level constants:
 | Parameter | Type | Default | Description |
 |-----------|------|:-------:|-------------|
 | `direct_boost` | `float` | `0.1` | Stability increase for direct retrieval |
-| `associative_boost` | `float` | `0.03` | Stability increase for associative retrieval |
+| `associative_boost` | `float` | `0.05` | Stability increase for associative retrieval |
 | `max_spaced_rep_multiplier` | `float` | `2.0` | Cap on spaced repetition factor |
 | `spaced_rep_interval_days` | `float` | `7.0` | Days for 1x spaced rep factor |
 
@@ -81,7 +97,7 @@ The base decay rates and floors are defined as module-level constants:
 |-----------|------|:-------:|-------------|
 | `core_access_threshold` | `int` | `10` | Min retrievals for promotion |
 | `core_stability_threshold` | `float` | `0.85` | Min stability for promotion |
-| `core_session_threshold` | `int` | `3` | Min distinct sessions for promotion |
+| `core_session_threshold` | `int` | `2` | Min distinct sessions for promotion |
 
 ### Associations
 
@@ -168,15 +184,17 @@ The TypeScript SDK exposes the same parameters as Python, using camelCase naming
 | `minRetention` | `number` | `0.2` | Minimum retention for retrieval results |
 | `faintThreshold` | `number` | `0.15` | Retention below which memories are "faint" |
 | `decayRates.episodic` | `number` | `45` | Episodic decay rate (days) |
-| `decayRates.semantic` | `number` | `120` | Semantic decay rate (days) |
+| `decayRates.semantic` | `number` | `240` | Semantic decay rate (days) |
 | `decayRates.procedural` | `number` | `Infinity` | Procedural decay rate (days) |
 | `decayRates.core` | `number` | `120` | Core decay rate (days) |
+| `coreRetentionFloor` | `number` | `0.60` | Retention floor for core memories |
+| `regularRetentionFloor` | `number` | `0.02` | Retention floor for non-core memories |
 | `retrievalScoreExponent` | `number` | `0.3` | Alpha in `score = sim * R^alpha` |
 | `directBoost` | `number` | `0.1` | Stability increase for direct retrieval |
-| `associativeBoost` | `number` | `0.03` | Stability increase for associative retrieval |
+| `associativeBoost` | `number` | `0.05` | Stability increase for associative retrieval |
 | `coreAccessThreshold` | `number` | `10` | Min retrievals for core promotion |
 | `coreStabilityThreshold` | `number` | `0.85` | Min stability for core promotion |
-| `coreSessionThreshold` | `number` | `3` | Min distinct sessions for core promotion |
+| `coreSessionThreshold` | `number` | `2` | Min distinct sessions for core promotion |
 | `consolidationRetentionThreshold` | `number` | `0.20` | Retention below which memories are consolidation candidates |
 | `consolidationGroupSize` | `number` | `5` | Min group size for consolidation |
 | `coldMigrationDays` | `number` | `7` | Days at floor before cold migration |
@@ -188,6 +206,13 @@ The TypeScript SDK exposes the same parameters as Python, using camelCase naming
 | `kSparse` | `number` | `30` | Number of lexical candidates for hybrid search |
 | `filterExpiredTransients` | `boolean` | `true` | Filter out transient memories past their expiry |
 | `includeExpiredInDeepRecall` | `boolean` | `true` | Include expired transients when deep recall is enabled |
+| `temporalQueryMode` | `string` | `"off"` | `"off"` or `"auto"` temporal query routing |
+| `temporalCandidateK` | `number` | `80` | Candidate pool floor for temporal queries |
+| `temporalFinalK` | `number` | `20` | Max chronological evidence items returned |
+| `temporalDecayAlpha` | `number` | `0.25` | Retention exponent used in temporal retrieval |
+| `temporalAnchorNeighborBoost` | `number` | `0.30` | Boost for memories near a temporal anchor |
+| `temporalValidityMatchBoost` | `number` | `0.35` | Boost for current/as-of validity matches |
+| `temporalTimeExpressionBoost` | `number` | `0.15` | Boost for explicit time expressions |
 | `graphExpansionHops` | `number` | `1` | Number of association hops for graph-based retrieval expansion |
 | `bridgeDiscovery` | `boolean` | `false` | Enable discovery of bridge paths between memories |
 | `maxBridgePaths` | `number` | `3` | Maximum number of bridge paths to return |
@@ -221,6 +246,15 @@ The TypeScript SDK exposes the same parameters as Python, using camelCase naming
         filter_expired_transients=True,
         include_expired_in_deep_recall=True,
 
+        # Temporal reconstruction
+        temporal_query_mode="off",
+        temporal_candidate_k=80,
+        temporal_final_k=20,
+        temporal_decay_alpha=0.25,
+        temporal_anchor_neighbor_boost=0.30,
+        temporal_validity_match_boost=0.35,
+        temporal_time_expression_boost=0.15,
+
         # Graph
         graph_expansion_hops=1,
         bridge_discovery=False,
@@ -232,14 +266,14 @@ The TypeScript SDK exposes the same parameters as Python, using camelCase naming
 
         # Retrieval boosting
         direct_boost=0.1,
-        associative_boost=0.03,
+        associative_boost=0.05,
         max_spaced_rep_multiplier=2.0,
         spaced_rep_interval_days=7.0,
 
         # Core promotion
         core_access_threshold=10,
         core_stability_threshold=0.85,
-        core_session_threshold=3,
+        core_session_threshold=2,
 
         # Associations
         association_strengthen_amount=0.1,
@@ -269,7 +303,12 @@ The TypeScript SDK exposes the same parameters as Python, using camelCase naming
         # Reranking
         rerank_enabled=False,
         k_rerank=10,
+        rerank_factor=1,
         rerank_model=None,
+
+        # Decay overrides
+        base_decay_rates={"semantic": 240.0},
+        decay_floors={"core": 0.60, "regular": 0.02},
 
         # Models
         embedding_model="text-embedding-3-small",
@@ -285,7 +324,10 @@ The TypeScript SDK exposes the same parameters as Python, using camelCase naming
       // Decay
       faintThreshold: 0.15,
       decayModel: "exponential",
+      decayRates: { episodic: 45, semantic: 240, procedural: Infinity, core: 120 },
       powerDecayGamma: 1.4427,
+      coreRetentionFloor: 0.60,
+      regularRetentionFloor: 0.02,
 
       // Hybrid search
       hybridSearch: false,
@@ -294,6 +336,15 @@ The TypeScript SDK exposes the same parameters as Python, using camelCase naming
       // Validity
       filterExpiredTransients: true,
       includeExpiredInDeepRecall: true,
+
+      // Temporal reconstruction
+      temporalQueryMode: "off",
+      temporalCandidateK: 80,
+      temporalFinalK: 20,
+      temporalDecayAlpha: 0.25,
+      temporalAnchorNeighborBoost: 0.30,
+      temporalValidityMatchBoost: 0.35,
+      temporalTimeExpressionBoost: 0.15,
 
       // Graph
       graphExpansionHops: 1,
@@ -306,14 +357,14 @@ The TypeScript SDK exposes the same parameters as Python, using camelCase naming
 
       // Retrieval boosting
       directBoost: 0.1,
-      associativeBoost: 0.03,
+      associativeBoost: 0.05,
       maxSpacedRepMultiplier: 2.0,
       spacedRepIntervalDays: 7.0,
 
       // Core promotion
       coreAccessThreshold: 10,
       coreStabilityThreshold: 0.85,
-      coreSessionThreshold: 3,
+      coreSessionThreshold: 2,
 
       // Associations
       associationStrengthenAmount: 0.1,
@@ -343,6 +394,7 @@ The TypeScript SDK exposes the same parameters as Python, using camelCase naming
       // Reranking
       rerankEnabled: false,
       kRerank: 10,
+      rerankFactor: 1,
       rerankModel: null,
 
       // Models

@@ -9,8 +9,8 @@ import GroupedBarChart from '../../../components/charts/GroupedBarChart';
 
 <GroupedBarChart client:visible
   data={[
-    { metric: 'Overall token F1', cogMem: 44.8, fadeMem: 27.2 },
-    { metric: 'Multi-hop token F1', cogMem: 48.5, fadeMem: 29.4 },
+    { metric: 'Overall token F1', cogMem: 46.2, fadeMem: 27.2 },
+    { metric: 'Multi-hop token F1', cogMem: 35.8, fadeMem: 29.4 },
   ]}
   xKey="metric"
   bars={[
@@ -24,7 +24,7 @@ import GroupedBarChart from '../../../components/charts/GroupedBarChart';
 
 FadeMem is important because it takes forgetting seriously. It moves beyond static vector memory by adding temporal decay. Cognitive Memory builds on a similar intuition but treats decay as one part of a larger lifecycle: reinforcement, associations, cold storage, deep recall, and consolidation.
 
-Under the cited LoCoMo protocol, Cognitive Memory scores higher overall and on multi-hop. The result should be read as evidence for the lifecycle stack, not as a blanket claim that every application needs that stack.
+Under the cited LoCoMo protocol, Cognitive Memory scores higher overall. The multi-hop number shown for Cognitive Memory uses the later corrected category mapping from the current-refresh artifact; it is useful context, not a same-codebase head-to-head.
 
 ## Architectural difference
 

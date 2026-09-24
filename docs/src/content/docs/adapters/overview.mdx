@@ -26,6 +26,9 @@ All adapters implement the same abstract interface (`MemoryAdapter` in Python, `
 | [JSONL](/cognitive-memory/adapters/jsonl/) | Python, TS | File | Brute-force cosine | Local debugging, audit logs |
 | [Postgres](/cognitive-memory/adapters/postgres/) | TS | Yes | pgvector | Production TypeScript apps |
 | [Convex](/cognitive-memory/adapters/convex/) | TypeScript | Yes | Convex vector search | Serverless apps |
+| Remote daemon | Python, TS source | Daemon-owned SQLite | Daemon service | Shared local memory across processes |
+
+The remote daemon adapters live in source and are part of the daemon deployment shape. The v0.5.1 TypeScript source manifest exports `adapters/remote`; the public npm package still reports v0.4.0, so npm users do not receive that surface until v0.5.1 is published. Treat the daemon repo as the canonical install guide for daemon mode until then.
 
 ## Decision matrix
 
@@ -43,6 +46,9 @@ Use `PostgresAdapter` with pgvector. Battle-tested, scalable, and supports concu
 **Production multi-tenant (serverless):**
 Use `ConvexAdapter` (TypeScript). Convex handles scaling, real-time sync, and multi-tenancy out of the box. No infrastructure to manage.
 
+**Shared local agents:**
+Use the daemon deployment when Claude Code, Cursor, scripts, and local apps should share one memory process. The SDK remote adapters talk to the daemon over a Unix socket; the daemon owns embedding cache, lifecycle maintenance, and writes.
+
 ### Choosing by priority
 
 | Priority | Recommended adapter |
@@ -51,6 +57,7 @@ Use `ConvexAdapter` (TypeScript). Convex handles scaling, real-time sync, and mu
 | Local persistence | JSONL |
 | Production reliability | Postgres (TypeScript) |
 | Zero infra management | Convex |
+| Shared local memory | Remote daemon |
 | Audit trail | JSONL |
 | Largest scale | Postgres with pgvector |
 

@@ -9,8 +9,8 @@ import GroupedBarChart from '../../../components/charts/GroupedBarChart';
 
 <GroupedBarChart client:visible
   data={[
-    { metric: 'Overall token F1', cogMem: 44.8, mem0: 26.3 },
-    { metric: 'Multi-hop token F1', cogMem: 48.5, mem0: 28.4 },
+    { metric: 'Overall token F1', cogMem: 46.2, mem0: 26.3 },
+    { metric: 'Multi-hop token F1', cogMem: 35.8, mem0: 28.4 },
   ]}
   xKey="metric"
   bars={[
@@ -22,7 +22,7 @@ import GroupedBarChart from '../../../components/charts/GroupedBarChart';
 
 ## What this comparison says
 
-Under the cited LoCoMo comparison protocol, Cognitive Memory scores higher on overall and multi-hop token F1. The largest gap is multi-hop, which is the setting most directly helped by associative expansion and broader recall.
+Under the cited LoCoMo comparison protocol, Cognitive Memory scores higher on overall token F1. The multi-hop number shown for Cognitive Memory uses the later corrected category mapping from the current-refresh artifact; it should be read cautiously beside published baseline numbers.
 
 This is not a claim that Cognitive Memory is better than Mem0 for every workload. Mem0 is a strong, simpler memory layer, and its hosted/product implementation may differ from any specific benchmark harness.
 

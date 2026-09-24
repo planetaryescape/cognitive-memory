@@ -61,7 +61,7 @@ await mem.store({
   category: "episodic",
 });
 
-// Semantic: lasting facts, 120-day base decay
+// Semantic: lasting facts, 240-day base decay in v0.5 defaults
 await mem.store({
   content: "User prefers dark roast coffee",
   category: "semantic",
@@ -183,7 +183,7 @@ const mem = new CognitiveMemory({
     minRetention: 0.2,
     decayRates: {
       episodic: 45,    // days (default)
-      semantic: 120,   // days (default)
+      semantic: 240,   // days (default)
       procedural: Infinity,
     },
   },

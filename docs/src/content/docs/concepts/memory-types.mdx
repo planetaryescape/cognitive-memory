@@ -40,7 +40,7 @@ Cognitive Memory classifies every memory into one of four categories. Each categ
 
 **What they are:** Lasting facts, preferences, relationships, and opinions. "User prefers dark roast coffee." "User has two dogs named Biscuit and Maple."
 
-**Decay behavior:** Base decay rate of 120 days. Facts persist longer than events because they remain relevant across time.
+**Decay behavior:** Base decay rate of 240 days in the v0.5 defaults. Facts persist longer than events because they remain relevant across time.
 
 **When to use:** This is the default category. The extractor assigns `semantic` to any fact that isn't clearly time-bound, procedural, or identity-defining.
 
@@ -96,7 +96,7 @@ Cognitive Memory classifies every memory into one of four categories. Each categ
 
 **What they are:** Identity-defining information. Name, age, nationality, medical conditions, family members, profession, where they live. These are the facts that define who the user is.
 
-**Decay behavior:** Base decay rate of 120 days (same as semantic), but with a **retention floor of 0.60**. This means a core memory's retention will never drop below 60%, no matter how long it goes without being accessed. Regular memories have a floor of 0.02 (essentially zero).
+**Decay behavior:** Base decay rate of 120 days, with a **retention floor of 0.60**. This means a core memory's retention will never drop below 60%, no matter how long it goes without being accessed. Regular memories have a floor of 0.02.
 
 **How memories become core:** There are two paths:
 
@@ -104,7 +104,7 @@ Cognitive Memory classifies every memory into one of four categories. Each categ
 2. **Through promotion:** Any memory that meets all three criteria is automatically promoted:
    - `access_count >= 10` (retrieved at least 10 times)
    - `stability >= 0.85` (high stability from repeated use)
-   - Accessed across `>= 3` distinct sessions
+   - Accessed across `>= 2` distinct sessions
 
 See [Core promotion](/cognitive-memory/concepts/core-promotion/) for details on the promotion mechanism.
 
@@ -134,7 +134,7 @@ See [Core promotion](/cognitive-memory/concepts/core-promotion/) for details on 
 | Category | Base decay (days) | Floor | Python enum |
 |----------|------------------|-------|-------------|
 | Episodic | 45 | 0.02 | `MemoryCategory.EPISODIC` |
-| Semantic | 120 | 0.02 | `MemoryCategory.SEMANTIC` |
+| Semantic | 240 | 0.02 | `MemoryCategory.SEMANTIC` |
 | Procedural | infinity | -- | `MemoryCategory.PROCEDURAL` |
 | Core | 120 | 0.60 | `MemoryCategory.CORE` |
 
@@ -159,13 +159,14 @@ The TypeScript SDK uses a slightly simplified type system:
   </TabItem>
 </Tabs>
 
-Core memory behavior in TypeScript is handled through stability thresholds and metadata rather than a separate type. The decay rates map directly:
+Core memory behavior in TypeScript uses the same `category: "core"` value as Python. The default decay rates map directly:
 
 | Type | Base decay (days) |
 |------|------------------|
-| `"episodic"` | 30 |
-| `"semantic"` | 90 |
+| `"episodic"` | 45 |
+| `"semantic"` | 240 |
 | `"procedural"` | infinity |
+| `"core"` | 120 |
 
 ## Semantic types
 
@@ -192,6 +193,17 @@ These two dimensions are **orthogonal**: a `plan` can be `episodic` (one-time tr
 | TTL | `ttl_seconds` | `ttlSeconds` | Alternative to `valid_until` — seconds from creation |
 
 Expired `plan` and `transient_state` memories are filtered from search results by default. See [Deep Recall](/cognitive-memory/concepts/deep-recall/) for how to include them.
+
+### Temporal metadata
+
+The v0.5.1 source also carries experimental temporal metadata on each memory:
+
+| Concept | Python | TypeScript | Purpose |
+|---------|--------|------------|---------|
+| Temporal metadata | `temporal` | `temporal` | Mentioned time, event time, validity status, raw time expressions, and temporal relations |
+| Event frame | `event_frame` | `eventFrame` | Structured subject/action/object/location/status view of the memory |
+
+This is separate from both `category` and `memory_type`. `category` controls decay, `memory_type` controls expiry behavior, and `temporal`/`event_frame` support default-off temporal reconstruction for sequence and current-state questions.
 
 ## How the extractor chooses
 

@@ -7,12 +7,11 @@ import GroupedBarChart from '../../../components/charts/GroupedBarChart';
 
 ## Current results
 
-These are the current logged results used by the May 2026 paper draft. Older Runs A-K/L/M are historical unless a page explicitly labels them as a pilot or ablation.
+These are the current logged results used by the May 2026 paper draft. The LoCoMo headline is the Phase 5 v0.5 tuned-default run; older Runs A-K/L/M are historical unless a page explicitly labels them as a pilot or ablation.
 
 <GroupedBarChart client:visible
   data={[
-    { benchmark: 'LoCoMo overall F1', primary: 44.8 },
-    { benchmark: 'LoCoMo multi-hop F1', primary: 48.5 },
+    { benchmark: 'LoCoMo overall F1', primary: 46.2 },
     { benchmark: 'LongMemEval-S accuracy', primary: 71.6 },
     { benchmark: 'LTI-Bench accuracy', primary: 88.1 },
     { benchmark: 'LTI-Bench F1', primary: 69.7 },
@@ -27,7 +26,7 @@ These are the current logged results used by the May 2026 paper draft. Older Run
 
 | Benchmark | What it stresses | Current result |
 |-----------|------------------|----------------|
-| LoCoMo | Long conversational recall and multi-hop QA | 44.8% overall token F1; 48.5% multi-hop token F1 |
+| LoCoMo | Long conversational recall and multi-session QA | 46.2% overall token F1 in the Phase 5 v0.5 tuned run |
 | LongMemEval-S | Long-horizon human-assistant memory across task types | 71.6% task-averaged accuracy; 72.6% overall accuracy |
 | LTI-Bench v2 | Controlled lifecycle behavior over 30 simulated days | 88.1% accuracy; 69.7% F1; 100% critical retention |
 
@@ -41,17 +40,19 @@ That means a high score on one benchmark should not be treated as a universal me
 
 ## Current interpretation
 
-Cognitive Memory is competitive under the stated protocols, with its strongest evidence on lifecycle behavior and multi-hop recall:
+Cognitive Memory is competitive under the stated protocols, with its strongest evidence on lifecycle behavior and temporal recall:
 
-- LoCoMo multi-hop F1 is 48.5%, compared with Mem0 28.4% and FadeMem 29.4% under the cited comparison protocol.
-- LongMemEval-S is 71.6%, effectively tied with ENGRAM-class single-stage memory systems but not a current leaderboard claim.
-- LTI-Bench retains 100% of identity-critical facts in the controlled 30-day harness.
+- LoCoMo overall F1 is 46.2% in the Phase 5 tuned-default run.
+- A later relabelled category pass fixed the LoCoMo category mapping: `1=multi-hop`, `2=temporal`, `3=open-domain`, `4=single-hop`. Under that corrected current-refresh view, temporal recall is the clearest in-house advantage over NaiveRAG.
+- LongMemEval-S is 71.6%, competitive with ENGRAM-class single-stage memory systems but not a current leaderboard claim.
+- LTI-Bench retains 100% of identity-critical facts in the controlled 30-day harness, but the Phase 8 floors-off ablation shows floor-clamping alone did not cause that result.
 
 ## Sources
 
 - Paper and arXiv source notes: [cognitive-memory-benchmarks/paper](https://github.com/planetaryescape/cognitive-memory/tree/main/cognitive-memory-benchmarks/paper)
 - Experiment log: [experimentlog.md](https://github.com/planetaryescape/cognitive-memory/blob/main/cognitive-memory-benchmarks/experimentlog.md)
 - Benchmark overview notes: [benchmarks-overview.md](https://github.com/planetaryescape/cognitive-memory/blob/main/cognitive-memory-benchmarks/docs/benchmarks-overview.md)
+- Post-paper controls: [Phase 12](https://github.com/planetaryescape/cognitive-memory-benchmarks/blob/main/docs/milestones/phase-12-local-architecture-control.md), [Phase 13](https://github.com/planetaryescape/cognitive-memory-benchmarks/blob/main/docs/milestones/phase-13-retrieval-evidence-plan.md), [Phase 15](https://github.com/planetaryescape/cognitive-memory-benchmarks/blob/main/docs/milestones/phase-15-naive-rag-baseline.md)
 
 ## Dive deeper
 

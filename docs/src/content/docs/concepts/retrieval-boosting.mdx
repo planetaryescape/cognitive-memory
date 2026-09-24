@@ -26,7 +26,7 @@ stability += 0.1 * spaced_rep_factor
 Applied to memories that were activated through association links (not direct matches):
 
 ```
-stability += 0.03 * spaced_rep_factor
+stability += 0.05 * spaced_rep_factor
 ```
 
 The associative boost is intentionally smaller. These memories weren't directly relevant to the query — they were pulled in because they're linked to something relevant. They deserve some reinforcement, but less than a direct match.
@@ -67,7 +67,7 @@ All of these feed back into the system:
 - Higher stability slows future decay (see [decay model](/cognitive-memory/concepts/decay-model/))
 - Higher access count contributes to core promotion eligibility
 - Updated last_accessed_at resets the decay clock
-- More session IDs move the memory toward the 3-session core promotion threshold
+- More session IDs move the memory toward the 2-session core promotion threshold
 
 ## Worked example
 
@@ -84,8 +84,8 @@ new_stability = min(1.0, 0.3 + 0.143) = 0.443
 
 Gets retrieved associatively:
 ```
-boost = 0.03 * 1.43 = 0.043
-new_stability = min(1.0, 0.3 + 0.043) = 0.343
+boost = 0.05 * 1.43 = 0.071
+new_stability = min(1.0, 0.3 + 0.071) = 0.371
 ```
 
 Over many retrievals, stability asymptotically approaches 1.0, making the memory increasingly resistant to decay.
@@ -97,7 +97,7 @@ Over many retrievals, stability asymptotically approaches 1.0, making the memory
     ```python
     config = CognitiveMemoryConfig(
         direct_boost=0.1,              # base direct boost
-        associative_boost=0.03,        # base associative boost
+        associative_boost=0.05,        # base associative boost
         max_spaced_rep_multiplier=2.0, # cap on spaced rep factor
         spaced_rep_interval_days=7.0,  # days for 1x factor
     )
@@ -109,7 +109,7 @@ Over many retrievals, stability asymptotically approaches 1.0, making the memory
 
     const config: Partial<CognitiveMemoryConfig> = {
       directBoost: 0.1, // base direct boost
-      associativeBoost: 0.03, // base associative boost
+      associativeBoost: 0.05, // base associative boost
       maxSpacedRepMultiplier: 2.0, // cap on spaced rep factor
       spacedRepIntervalDays: 7.0, // days for 1x factor
     };

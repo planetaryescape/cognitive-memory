@@ -69,7 +69,7 @@ const results = response.results;
 | `deepRecall` | `boolean` | `false` | Include cold and superseded records in the candidate set. Stubs stay excluded. |
 | `trace` | `boolean` | `false` | When `true`, the response includes a `trace` field with scoring breakdown and pipeline timing details |
 
-Returns a `SearchResponse` object containing a `results` array of `SearchResult` objects sorted by `combinedScore` descending, evidence chains, and an optional `trace` field when tracing is enabled.
+Returns a `SearchResponse` object containing a `results` array of `SearchResult` objects sorted by `combinedScore` descending, evidence chains, optional `temporalEvidence` when temporal auto-routing fires, and an optional `trace` field when tracing is enabled.
 
 Side effects: strengthens retrieved memories (access count, stability, last accessed) and co-retrieval associations.
 
@@ -162,6 +162,22 @@ interface Memory {
     createdAt: number;            // timestamp (ms)
     updatedAt: number;            // timestamp (ms)
     metadata?: Record<string, unknown>;
+    associations: Record<string, Association>;
+    sessionIds: string[];
+    isCold: boolean;
+    coldSince: number | null;
+    daysAtFloor: number;
+    isSuperseded: boolean;
+    supersededBy: string | null;
+    contradictedBy: string | null;
+    isStub: boolean;
+    semanticType?: SemanticType;
+    validFrom?: number | null;
+    validUntil?: number | null;
+    ttlSeconds?: number | null;
+    sourceTurnIds?: string[];
+    temporal?: TemporalMetadata;
+    eventFrame?: EventFrame;
 }
 ```
 
@@ -174,6 +190,42 @@ interface MemoryInput {
     importance?: number;          // default: config.defaultImportance
     stability?: number;           // default: config.defaultStability
     metadata?: Record<string, unknown>;
+    semanticType?: SemanticType;
+    validFrom?: number | null;
+    validUntil?: number | null;
+    ttlSeconds?: number | null;
+    temporal?: TemporalMetadata;
+    eventFrame?: EventFrame;
+}
+```
+
+### TemporalMetadata and EventFrame
+
+```typescript
+interface TemporalMetadata {
+    mentionedAt?: { sessionId?: string; timestamp?: string };
+    eventTime?: {
+        start?: string | null;
+        end?: string | null;
+        granularity?: "turn" | "day" | "week" | "month" | "year" | "unknown";
+        rawExpression?: string | null;
+        confidence?: number;
+    };
+    validTime?: {
+        validFrom?: string | null;
+        validTo?: string | null;
+        status?: "planned" | "in_progress" | "completed" | "cancelled" | "hypothetical" | "current" | "superseded" | "unknown";
+    };
+    rawTimeExpressions?: string[];
+}
+
+interface EventFrame {
+    eventType?: "state" | "event" | "plan" | "preference" | "update" | "relationship" | "achievement" | "other";
+    subjects?: string[];
+    action?: string;
+    objects?: string[];
+    location?: string;
+    status?: "planned" | "in_progress" | "completed" | "cancelled" | "hypothetical" | "current" | "superseded" | "unknown";
 }
 ```
 
@@ -198,6 +250,15 @@ interface RetrievalQuery {
 interface SearchResponse {
     results: SearchResult[];
     evidenceChains: string[][];
+    temporalEvidence?: Array<{
+        memoryId: string;
+        content: string;
+        eventTime?: TemporalMetadata["eventTime"];
+        validTime?: TemporalMetadata["validTime"];
+        mentionedAt?: TemporalMetadata["mentionedAt"];
+        sourceTurnIds?: string[];
+        combinedScore: number;
+    }>;
     trace?: SearchTrace;          // present when trace=true
 }
 
@@ -211,18 +272,18 @@ interface SearchResult {
 }
 
 interface SearchTrace {
-    stages: StageTrace[];
-    totalMs: number;
+    stages: Record<string, StageTrace>;
+    totalWallMs: number;
     totalTokens: number;          // sum of all prompt + completion tokens across stages
 }
 
 interface StageTrace {
     name: string;
     candidateCount: number;
-    survivorCount: number;
-    durationMs: number;
-    promptTokens: number;         // LLM prompt tokens used (0 for non-LLM stages)
-    completionTokens: number;     // LLM completion tokens used (0 for non-LLM stages)
+    wallMs: number;
+    promptTokens?: number;        // LLM prompt tokens used (0 for non-LLM stages)
+    completionTokens?: number;    // LLM completion tokens used (0 for non-LLM stages)
+    metadata?: Record<string, unknown>;
 }
 ```
 
@@ -277,12 +338,18 @@ interface CognitiveMemoryConfig {
     defaultStability?: number;    // default: 0.3
     minRetention?: number;        // default: 0.2
     decayRates?: {
-        episodic?: number;        // default: 30 (days)
-        semantic?: number;        // default: 90 (days)
+        episodic?: number;        // default: 45 (days)
+        semantic?: number;        // default: 240 (days)
         procedural?: number;      // default: Infinity
+        core?: number;            // default: 120 (days)
     };
+    coreRetentionFloor?: number;  // default: 0.60
+    regularRetentionFloor?: number; // default: 0.02
+    temporalQueryMode?: "off" | "auto"; // default: "off"
 }
 ```
+
+`TemporalMetadata` separates when the memory was mentioned, when the event happened, and when the fact is valid. `EventFrame` stores an experimental subject/action/object/location/status view used only by the default-off temporal reconstruction path.
 
 ### EmbeddingProvider
 
@@ -356,7 +423,10 @@ Extract topic keywords from text.
 ```typescript
 import { InMemoryAdapter, MemoryAdapter } from "cognitive-memory";
 import { PostgresAdapter } from "cognitive-memory/adapters/postgres";
-import { JsonlAdapter } from "cognitive-memory/adapters/jsonl";
+import { JsonlFileAdapter } from "cognitive-memory/adapters/jsonl";
+import { RemoteAdapter } from "cognitive-memory/adapters/remote"; // v0.5.1 source
 ```
+
+`RemoteAdapter` is exported by the v0.5.1 source package manifest, but the public npm package still reports v0.4.0. Use a source checkout for daemon IPC until the npm package is published.
 
 See [Adapter specification](/cognitive-memory/api/adapter-spec/) for the full interface.

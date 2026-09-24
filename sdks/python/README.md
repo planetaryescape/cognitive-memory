@@ -4,7 +4,7 @@ Biologically-inspired agent memory with decay, consolidation, and tiered storage
 
 [![PyPI version](https://img.shields.io/pypi/v/cognitive-memory.svg)](https://pypi.org/project/cognitive-memory/)
 
-Python SDK. v0.4.0 brings hybrid retrieval (BM25 + vector), power-law decay, graph expansion, LLM rerank, deferred conflict resolution, multi-tenancy, a pluggable `LLMProvider`, and a JSONL file adapter. Behavioural parity with the TypeScript SDK.
+Python SDK. v0.5.1 brings the v0.5 tuned defaults, configurable decay floors for ablations/tuning, hybrid retrieval (BM25 + vector), power-law decay as an opt-in mode, graph expansion, LLM rerank, deferred conflict resolution, multi-tenancy, a pluggable `LLMProvider`, and a JSONL file adapter. Behavioural parity with the TypeScript SDK.
 
 ## Install
 
@@ -85,11 +85,10 @@ await alice.add("alice's secret")
 - `InMemoryAdapter` — default, ephemeral
 - `JsonlFileAdapter` — append-only event log, replay on startup
 - Custom — implement `MemoryAdapter` from `cognitive_memory.adapters`
-- Postgres (pgvector) — planned for 0.4.1
 
 ## Migration
 
-See [`MIGRATION.md`](./MIGRATION.md) for the 0.3.0 → 0.4.0 changes (all additive — existing code keeps working).
+See [`CHANGELOG.md`](./CHANGELOG.md) for v0.5.x defaults and the 0.3.0 → 0.4.0 additive migration notes.
 
 ## Docs
 

@@ -27,19 +27,19 @@ Multi-hop questions often need a fact that is related to another fact, not direc
 
 <HorizontalBarChart client:visible
   data={[
-    { system: 'Cognitive Memory', accuracy: 48.5 },
+    { system: 'Cognitive Memory', accuracy: 35.8 },
+    { system: 'Naive RAG', accuracy: 40.1 },
     { system: 'FadeMem', accuracy: 29.4 },
     { system: 'Mem0', accuracy: 28.4 },
-    { system: 'Naive RAG', accuracy: 15 },
   ]}
   yKey="system"
   dataKey="accuracy"
   name="LoCoMo multi-hop token F1"
-  colors={['#8b5cf6', '#10b981', '#f59e0b', '#a1a1aa']}
-  xDomain={[0, 55]}
+  colors={['#8b5cf6', '#a1a1aa', '#10b981', '#f59e0b']}
+  xDomain={[0, 45]}
 />
 
-These numbers do not mean one system is universally better at memory. They show that, under this LoCoMo protocol, Cognitive Memory's association and recall machinery helps on questions that require connecting facts.
+These numbers use the corrected LoCoMo category mapping from the later analysis. They do not mean one system is universally better at memory. They show the opposite lesson: multi-hop remains a hard evidence-composition problem, and plain vector retrieval can still be strong on this slice.
 
 ## The benchmark lens
 
